@@ -1,0 +1,16 @@
+# Jellyfin for Synology DS1825+ (Container Manager > Project)
+# 1. user: の数字は SSH で `id <DSMユーザー名>` を実行して uid:gid に置き換える
+# 2. 動画フォルダのパスは自分の環境に合わせて変更する（左側がNAS側）
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    user: "1026:100"
+    network_mode: host          # ポート 8096 をそのまま使う（DLNA/自動検出も楽）
+    environment:
+      - TZ=Asia/Tokyo
+    volumes:
+      - /volume1/docker/jellyfin/config:/config
+      - /volume1/docker/jellyfin/cache:/cache
+      - /volume1/video:/media/video:ro   # 動画は読み取り専用で安全に
+    restart: unless-stopped
