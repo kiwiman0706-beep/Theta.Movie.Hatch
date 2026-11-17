@@ -7,11 +7,13 @@ Synology の Video Station の代わりになる、NAS（DS1825+）の動画プ�
 - **ファイルが正本**：作品の並べ方と名前は [`docs/naming-convention.md`](docs/naming-convention.md)（Jellyfin・Plex・Kodi でもそのまま読める形）。情報は `.nfo` とポスター（`poster.jpg`）から
 - Jellyfin は無くても動く。入れておけば公式アプリ・LG のテレビ（webOS）で同じライブラリを見られる（[`server/jellyfin/`](server/jellyfin/README.md)）
 
-## できること（0.1.0）
+## できること（0.2.0）
 
-- 棚（映画・アニメ映画・ドラマ・アニメ・テレビ・ライブ・ホームビデオ）ごとのポスターの一覧、最近追加、検索（題名・出演者・監督）
-- 作品の画面：あらすじ・出演・シーズンと話・バージョン・特典映像・関連（同じ出演者・同じコレクション）
-- 再生：続きから、次の話、音声（二か国語）と字幕の切り替え、ダブルタップで早送り・戻し
+- 画面は Theta Music Hatch と同じ（Theta スキン＋クリックホイール）：上にタブ付きの一覧、下に動画のパネルとホイール。**再生しながら一覧を見て回れる**
+- 一覧：続きから・最近追加・棚（映画・アニメ映画・ドラマ・アニメ・テレビ・ライブ・ホームビデオ）・探す（題名・出演者・監督）。棚 → 作品 → シーズン → 話
+- 作品：再生・続きから・最初から・あらすじ・出演者（同じ人の作品へ）・特典映像・関連（同じ出演者・同じコレクション）
+- 再生中のパネル：回すと早送り・戻し、中央で音量、◀◀ ▶▶ で前・次の話。全画面は中央の長押し・横向き・ダブルタップ。全画面で音声（二か国語）と字幕の切り替え
+- 読むフォルダの目印（既定 ⑧、Theta Book Hatch と同じ）
 - 整理前のフォルダもできるだけ読む（`第5話`・`#12`・`S02E10`・放送日の名前、まとまりのフォルダ）
 - シリーズの共通設定：スキン（`ui.skin`）、NAS の接続先・パスワード・2 段階認証のトークンを Theta Home Hatch から受け取る。更新は Home に頼む
 
@@ -29,7 +31,8 @@ Synology の Video Station の代わりになる、NAS（DS1825+）の動画プ�
 lib/core/   naming.dart（名前の読み取り）・scanner.dart（作品にまとめる）・nfo.dart
             dsm.dart（File Station）・webdav.dart・library.dart・progress.dart（続きから）
             series.dart（ハブとのやり取り。Android 側は Series.kt）
-lib/ui/     home・shelf・title・player・settings、hud/（シリーズのスキン）
+lib/ui/     shell（一覧・パネル・ホイール・全画面）・menus（一覧の中身）・menu・click_wheel（Music Hatch から）・settings、hud/（シリーズのスキン）
+lib/core/playback.dart  再生（画面と別に持つので、一覧を見ても止まらない）
 server/     Jellyfin（NAS に並べて入れる場合）
 tools/      （次の版）Video Station からの移行・整理ツール
 ```

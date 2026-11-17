@@ -1,12 +1,9 @@
 import 'dart:typed_data';
 
-import 'package:material_ui/material_ui.dart' hide Title;
+import 'package:material_ui/material_ui.dart';
 
 import '../app.dart';
-import '../core/models.dart';
-import '../core/progress.dart';
 import 'hud/hud_theme.dart';
-import 'title_screen.dart';
 
 /// NAS の画像（ポスター・背景）。無ければ頭文字
 class NasImage extends StatefulWidget {
@@ -24,8 +21,8 @@ class _NasImageState extends State<NasImage> {
   String? _loaded;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
+  void initState() {
+    super.initState();
     _load();
   }
 
@@ -37,12 +34,15 @@ class _NasImageState extends State<NasImage> {
 
   void _load() {
     final path = widget.path;
-    if (path == null || path == _loaded) return;
+    if (path == _loaded) return;
     _loaded = path;
-    final posters = AppScope.of(context).posters;
-    _bytes = posters.cached(path);
+    if (path == null) {
+      _bytes = null;
+      return;
+    }
+    _bytes = services.posters.cached(path);
     if (_bytes == null) {
-      posters.get(path).then((b) {
+      services.posters.get(path).then((b) {
         if (mounted && widget.path == path) setState(() => _bytes = b);
       });
     }
@@ -53,7 +53,12 @@ class _NasImageState extends State<NasImage> {
     final p = HudScope.of(context);
     final b = widget.path == null ? null : _bytes;
     if (b != null) {
-      return Image.memory(b, fit: widget.fit, gaplessPlayback: true, errorBuilder: (_, _, _) => _fallback(p));
+      return Image.memory(b,
+          fit: widget.fit,
+          width: double.infinity,
+          height: double.infinity,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => _fallback(p));
     }
     return _fallback(p);
   }
@@ -62,105 +67,16 @@ class _NasImageState extends State<NasImage> {
         color: p.raised,
         alignment: Alignment.center,
         padding: const EdgeInsets.all(8),
-        child: Text(
-          widget.fallback,
-          textAlign: TextAlign.center,
-          maxLines: 4,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: p.muted, fontSize: 13, fontFamily: p.display),
-        ),
-      );
-}
-
-/// ポスター 1 枚（2:3）と題名。mark があれば下に進み具合の線
-class PosterTile extends StatelessWidget {
-  final Title title;
-  final String? subtitle;
-  final Mark? mark;
-  final VoidCallback? onTap;
-  final double width;
-  const PosterTile({super.key, required this.title, this.subtitle, this.mark, this.onTap, this.width = 120});
-
-  @override
-  Widget build(BuildContext context) {
-    final p = HudScope.of(context);
-    final y = title.displayYear;
-    return SizedBox(
-      width: width,
-      child: InkWell(
-        onTap: onTap ??
-            () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TitleScreen(titleId: title.id))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          AspectRatio(
-            aspectRatio: 2 / 3,
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: p.line, width: p.lineWidth),
-                borderRadius: BorderRadius.circular(p.rounded ? p.radius * 0.6 : 0),
+        child: widget.fallback.isEmpty
+            ? Icon(Icons.movie_outlined, color: p.faint, size: 18)
+            : Text(
+                widget.fallback,
+                textAlign: TextAlign.center,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: p.muted, fontSize: 13, fontFamily: p.display),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: Stack(fit: StackFit.expand, children: [
-                NasImage(title.poster, fallback: title.displayName),
-                if (mark != null && mark!.ratio > 0)
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: LinearProgressIndicator(
-                      value: mark!.ratio,
-                      minHeight: 4,
-                      color: p.accent,
-                      backgroundColor: Colors.black45,
-                    ),
-                  ),
-              ]),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(title.displayName,
-              maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.fg, fontSize: 12, height: 1.25)),
-          Text(subtitle ?? (y == null ? '' : '$y'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: p.faint, fontSize: 11, fontFamily: p.mono)),
-        ]),
-      ),
-    );
-  }
-}
-
-/// 横 1 列の棚
-class PosterRow extends StatelessWidget {
-  final String code;
-  final String label;
-  final List<Widget> children;
-  final VoidCallback? onMore;
-  const PosterRow({super.key, required this.code, required this.label, required this.children, this.onMore});
-
-  @override
-  Widget build(BuildContext context) {
-    final p = HudScope.of(context);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
-        child: Row(children: [
-          Text('[ $code ]', style: TextStyle(color: p.accent, fontSize: 11, letterSpacing: 2, fontFamily: p.mono)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(label, style: TextStyle(color: p.fg, fontSize: 15, fontWeight: FontWeight.w600))),
-          if (onMore != null)
-            TextButton(onPressed: onMore, child: Text('すべて ›', style: TextStyle(color: p.muted, fontSize: 12))),
-        ]),
-      ),
-      SizedBox(
-        height: 236,
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          scrollDirection: Axis.horizontal,
-          itemCount: children.length,
-          separatorBuilder: (_, _) => const SizedBox(width: 12),
-          itemBuilder: (_, i) => children[i],
-        ),
-      ),
-    ]);
-  }
+      );
 }
 
 String fmtDuration(int sec) {
@@ -183,3 +99,46 @@ String fmtSize(int bytes) {
 
 void toast(BuildContext context, String text) =>
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+
+/// 確認コード（Secure SignIn）の入力
+Future<String?> askOtp(BuildContext context) {
+  final c = TextEditingController();
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('2 段階認証'),
+      content: TextField(
+        controller: c,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(labelText: '確認コード（6 桁）'),
+        onSubmitted: (v) => Navigator.of(ctx).pop(v),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('やめる')),
+        FilledButton(onPressed: () => Navigator.of(ctx).pop(c.text), child: const Text('ログイン')),
+      ],
+    ),
+  );
+}
+
+/// 文字の入力（探す）
+Future<String?> askText(BuildContext context, String title, {String hint = ''}) {
+  final c = TextEditingController();
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: c,
+        autofocus: true,
+        decoration: InputDecoration(hintText: hint),
+        onSubmitted: (v) => Navigator.of(ctx).pop(v),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('やめる')),
+        FilledButton(onPressed: () => Navigator.of(ctx).pop(c.text), child: const Text('探す')),
+      ],
+    ),
+  );
+}

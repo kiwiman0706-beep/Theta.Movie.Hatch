@@ -6,6 +6,6 @@ import 'app.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  final services = await Services.create();
-  runApp(MovieApp(services: services));
+  await Services.create();
+  runApp(const MovieApp());
 }

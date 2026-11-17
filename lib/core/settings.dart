@@ -50,6 +50,11 @@ class AppSettings extends ChangeNotifier {
   /// 続きから：残りがこれ未満なら「見終わった」
   int doneMarginSec = 120;
 
+  /// ホイール（Theta Music Hatch と同じ）：カリカリ音・振動・案内
+  bool clicker = true;
+  bool haptics = true;
+  bool wheelGuide = true;
+
   bool get configured => (source == SourceKind.dsm ? dsUrl : davUrl).trim().isNotEmpty && user.isNotEmpty;
 
   Future<void> load() async {
@@ -63,6 +68,9 @@ class AppSettings extends ChangeNotifier {
     skin = _p.getString('skin') ?? 'system';
     followSeriesSkin = _p.getBool('followSeriesSkin') ?? true;
     doneMarginSec = _p.getInt('doneMarginSec') ?? 120;
+    clicker = _p.getBool('clicker') ?? true;
+    haptics = _p.getBool('haptics') ?? true;
+    wheelGuide = _p.getBool('wheelGuide') ?? true;
     final s = secure;
     if (s != null) {
       try {
@@ -85,6 +93,9 @@ class AppSettings extends ChangeNotifier {
     await _p.setString('skin', skin);
     await _p.setBool('followSeriesSkin', followSeriesSkin);
     await _p.setInt('doneMarginSec', doneMarginSec);
+    await _p.setBool('clicker', clicker);
+    await _p.setBool('haptics', haptics);
+    await _p.setBool('wheelGuide', wheelGuide);
     final values = {'password': password, 'did': did};
     final s = secure;
     for (final k in _secretKeys) {

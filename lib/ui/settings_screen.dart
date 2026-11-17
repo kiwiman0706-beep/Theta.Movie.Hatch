@@ -5,7 +5,6 @@ import '../core/library.dart';
 import '../core/series.dart';
 import '../core/settings.dart';
 import '../core/source.dart';
-import 'home_screen.dart' show askOtp;
 import 'hud/hud_theme.dart';
 import 'hud/hud_widgets.dart';
 import 'hud/skins.g.dart';
@@ -218,6 +217,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
             ]),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        HudPanel(
+          code: 'WHEEL',
+          title: 'ホイール',
+          child: Column(children: [
+            for (final (label, get, set) in <(String, bool Function(), void Function(bool))>[
+              ('カリカリ音', () => _s.clicker, (v) => _s.clicker = v),
+              ('振動', () => _s.haptics, (v) => _s.haptics = v),
+              ('ボタンの案内（押すと何が起きるか）', () => _s.wheelGuide, (v) => _s.wheelGuide = v),
+            ])
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(label),
+                value: get(),
+                onChanged: (v) async {
+                  set(v);
+                  await _s.save();
+                  setState(() {});
+                },
+              ),
           ]),
         ),
         const SizedBox(height: 16),
