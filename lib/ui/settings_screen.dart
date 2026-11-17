@@ -1,0 +1,258 @@
+import 'package:material_ui/material_ui.dart';
+
+import '../app.dart';
+import '../core/series.dart';
+import '../core/settings.dart';
+import '../core/source.dart';
+import 'home_screen.dart' show askOtp;
+import 'hud/hud_theme.dart';
+import 'hud/hud_widgets.dart';
+import 'hud/skins.g.dart';
+import 'widgets.dart';
+
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late final AppSettings _s = AppScope.of(context).settings;
+  late final _dsUrl = TextEditingController(text: _s.dsUrl);
+  late final _davUrl = TextEditingController(text: _s.davUrl);
+  late final _user = TextEditingController(text: _s.user);
+  late final _pass = TextEditingController(text: _s.password);
+  late final _root = TextEditingController(text: _s.videoRoot);
+  String _hub = '';
+  String _version = '';
+  String? _latest;
+  bool _busy = false;
+  String _result = '';
+
+  @override
+  void initState() {
+    super.initState();
+    Series.hub().then((h) => mounted ? setState(() => _hub = h) : null);
+    Series.version().then((v) {
+      if (mounted) setState(() => _version = v);
+      Series.latest().then((l) => mounted ? setState(() => _latest = l) : null);
+    });
+  }
+
+  Future<void> _apply() async {
+    final changed = _s.dsUrl != _dsUrl.text.trim() ||
+        _s.davUrl != _davUrl.text.trim() ||
+        _s.user != _user.text.trim() ||
+        _s.password != _pass.text;
+    _s
+      ..dsUrl = _dsUrl.text.trim()
+      ..davUrl = _davUrl.text.trim()
+      ..user = _user.text.trim()
+      ..password = _pass.text
+      ..videoRoot = _normRoot(_root.text);
+    if (changed) _s.did = '';
+    final lib = AppScope.of(context).library;
+    await _s.save();
+    lib.resetSource();
+  }
+
+  static String _normRoot(String r) {
+    var s = r.trim();
+    if (s.isEmpty) return '/video';
+    if (!s.startsWith('/')) s = '/$s';
+    while (s.length > 1 && s.endsWith('/')) {
+      s = s.substring(0, s.length - 1);
+    }
+    return s;
+  }
+
+  Future<void> _test() async {
+    setState(() {
+      _busy = true;
+      _result = '';
+    });
+    final lib = AppScope.of(context).library;
+    await _apply();
+    try {
+      await lib.source.check();
+      final n = (await lib.source.list(_s.videoRoot)).length;
+      _result = 'つながりました（${_s.videoRoot} に $n 項目）';
+    } on OtpRequired catch (e) {
+      if (!mounted) return;
+      final code = await askOtp(context);
+      if (code != null) {
+        lib.setOtp(code);
+        setState(() => _busy = false);
+        return _test();
+      }
+      _result = e.message;
+    } catch (e) {
+      _result = '$e';
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  /// Theta Home Hatch（設定のハブ）の NAS の設定を使う（THETA_SHARED_SETTINGS.md §4.1）
+  Future<void> _fromHub() async {
+    final info = await Series.info();
+    try {
+      final url = info['nas.url'] ?? '';
+      final user = info['nas.user'] ?? '';
+      final pass = await Series.secret('nas.password');
+      final token = await Series.secret('nas.deviceToken');
+      setState(() {
+        if (url.isNotEmpty) _dsUrl.text = url;
+        if (user.isNotEmpty) _user.text = user;
+        if (pass.isNotEmpty) _pass.text = pass;
+      });
+      await _apply();
+      if (token.isNotEmpty) {
+        _s.did = token;
+        await _s.save();
+      }
+      if (mounted) toast(context, 'Home Hatch の NAS の設定を受け取りました');
+    } catch (e) {
+      if (mounted) toast(context, '受け取れませんでした：$e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _apply();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = HudScope.of(context);
+    final services = AppScope.of(context);
+    InputDecoration deco(String label, [String? hint]) =>
+        InputDecoration(labelText: label, hintText: hint, border: const OutlineInputBorder(), isDense: true);
+    return Scaffold(
+      backgroundColor: p.bg,
+      appBar: AppBar(backgroundColor: p.bg, foregroundColor: p.fg, title: const Text('設定')),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        HudPanel(
+          code: 'NAS',
+          title: '動画の読み先',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SegmentedButton<SourceKind>(
+              segments: const [
+                ButtonSegment(value: SourceKind.dsm, label: Text('File Station（おすすめ）')),
+                ButtonSegment(value: SourceKind.webdav, label: Text('WebDAV')),
+              ],
+              selected: {_s.source},
+              onSelectionChanged: (v) async {
+                _s.source = v.first;
+                await _apply();
+                setState(() {});
+              },
+            ),
+            const SizedBox(height: 12),
+            if (_s.source == SourceKind.dsm)
+              TextField(controller: _dsUrl, decoration: deco('DSM の URL', 'http://nas.tailXXXX.ts.net:5000'))
+            else
+              TextField(controller: _davUrl, decoration: deco('WebDAV の URL', 'http://nas.tailXXXX.ts.net:5005')),
+            const SizedBox(height: 10),
+            TextField(controller: _user, decoration: deco('ユーザー名')),
+            const SizedBox(height: 10),
+            TextField(controller: _pass, obscureText: true, decoration: deco('パスワード')),
+            const SizedBox(height: 10),
+            TextField(controller: _root, decoration: deco('動画のフォルダ', '/video')),
+            const SizedBox(height: 12),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              PillButton(icon: Icons.wifi_tethering, text: '接続を確かめる', primary: true, onTap: _busy ? null : _test),
+              if (_hub.isNotEmpty) PillButton(icon: Icons.home, text: 'Home Hatch の設定を使う', onTap: _fromHub),
+            ]),
+            if (_busy) Padding(padding: const EdgeInsets.only(top: 12), child: LinearProgressIndicator(color: p.accent)),
+            if (_result.isNotEmpty)
+              Padding(padding: const EdgeInsets.only(top: 12), child: Text(_result, style: TextStyle(color: p.muted))),
+            const SizedBox(height: 8),
+            Text(
+              '外からは Tailscale で。2 段階認証（Secure SignIn）は File Station のときに使えます。'
+              '確認コードを 1 回入れれば、この端末は次から要りません。',
+              style: TextStyle(color: p.faint, fontSize: 11, height: 1.5),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        HudPanel(
+          code: 'SKIN',
+          title: 'スキン',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('シリーズに合わせる（Home Hatch と同じ）'),
+              value: _s.followSeriesSkin,
+              onChanged: (v) async {
+                _s.followSeriesSkin = v;
+                await _s.save();
+                if (v) await services.followHub();
+                setState(() {});
+              },
+            ),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final k in skinNames)
+                ChoiceChip(
+                  label: Text(k == 'system' ? '端末に合わせる' : skinLabels[k] ?? k),
+                  selected: _s.skin == k,
+                  onSelected: (_) async {
+                    _s.skin = k;
+                    await _s.save();
+                    if (_s.followSeriesSkin) await Series.tell('ui.skin', k);
+                    setState(() {});
+                  },
+                ),
+            ]),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        HudPanel(
+          code: 'DATA',
+          title: 'キャッシュ',
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            PillButton(
+              icon: Icons.sync,
+              text: 'NAS を読み直す',
+              onTap: () {
+                services.library.scan();
+                Navigator.of(context).maybePop();
+              },
+            ),
+            PillButton(
+              icon: Icons.image_not_supported,
+              text: 'ポスターを取り直す',
+              onTap: () async {
+                await services.posters.clear();
+                if (context.mounted) toast(context, 'ポスターのキャッシュを消しました');
+              },
+            ),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        HudPanel(
+          code: 'VER',
+          title: 'この版',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Theta Movie Hatch $_version', style: TextStyle(color: p.fg, fontFamily: p.mono)),
+            if (_latest != null && Series.newer(_latest!, _version))
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('新しい版 $_latest があります', style: TextStyle(color: p.accent)),
+              ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: PillButton(
+                icon: Icons.system_update,
+                text: _hub.isEmpty ? 'Releases を開く' : '更新する（Home Hatch に頼む）',
+                onTap: Series.requestUpdate,
+              ),
+            ),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
