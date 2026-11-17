@@ -69,7 +69,7 @@ jobs:
           fi
           mkdir -p "$RUNNER_TEMP/signing"
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/signing/release.jks"
-          SIGNING_FILE="$RUNNER_TEMP/signing/release.jks" flutter build apk --release
+          SIGNING_FILE="$RUNNER_TEMP/signing/release.jks" flutter build apk --release --target-platform android-arm,android-arm64
           rm -rf "$RUNNER_TEMP/signing"
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk "dist/ThetaMovieHatch-${{ steps.v.outputs.version }}.apk"

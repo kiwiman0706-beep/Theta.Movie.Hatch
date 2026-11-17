@@ -37,6 +37,7 @@ tools/      （次の版）Video Station からの移行・整理ツール
 - スキンの色は `lib/ui/hud/skins.g.dart`（生成。`python tool/gen_skins.py <Theta.Hatch.Series>/design/skins/skins.json`）
 - テスト：`flutter analyze`・`flutter test`（`test/fake_dsm.py` で DSM を真似た結合テストを含む。python3 が要る）
 - Release：版（`pubspec.yaml`）を上げて既定ブランチに push すると `release.yml` が `v<版>` の Release を作る。署名はシリーズ共通の鍵（Secret 4 つ）。本文は `docs/releases/v<版>.md`
+- APK は ARM だけ（`flutter build apk --release --target-platform android-arm,android-arm64`）
 - 手元で署名するときは `android/key.properties`（Git 管理外）。無ければデバッグ鍵（ハブからは入らない）
 
 ## シリーズ

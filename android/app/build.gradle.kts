@@ -58,6 +58,13 @@ android {
         }
     }
 
+    // スマホ・Android TV は ARM だけ。mpv の x86 版を外して APK を小さくする（ビルドは --target-platform android-arm,android-arm64）
+    packaging {
+        jniLibs {
+            excludes += listOf("lib/x86/**", "lib/x86_64/**")
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
