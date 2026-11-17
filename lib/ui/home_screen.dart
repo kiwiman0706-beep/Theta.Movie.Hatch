@@ -173,6 +173,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   lib.setOtp(code);
                   await lib.scan();
                 }
+              } else if (lib.skipped.isNotEmpty) {
+                await showDialog<void>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: Text('読めなかったフォルダ（${lib.skipped.length}）'),
+                    content: SizedBox(
+                      width: double.maxFinite,
+                      child: ListView(shrinkWrap: true, children: [
+                        for (final s in lib.skipped)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(s, style: const TextStyle(fontSize: 12)),
+                          ),
+                      ]),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('閉じる')),
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          lib.scan();
+                        },
+                        child: const Text('もう一度読む'),
+                      ),
+                    ],
+                  ),
+                );
               } else {
                 _openSettings();
               }

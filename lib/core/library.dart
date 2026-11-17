@@ -47,7 +47,7 @@ class Library extends ChangeNotifier {
       final f = await _cacheFile();
       if (!await f.exists()) return;
       final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-      if (j['root'] != settings.videoRoot) return;
+      if (j['root'] != _scope) return;
       titles = [for (final t in (j['titles'] as List)) Title.fromJson(t as Map<String, dynamic>)];
       scannedAt = j['at'] as int? ?? 0;
       notifyListeners();
@@ -59,14 +59,20 @@ class Library extends ChangeNotifier {
   Future<void> _saveCache() async {
     final f = await _cacheFile();
     await f.writeAsString(jsonEncode({
-      'root': settings.videoRoot,
+      'root': _scope,
       'at': scannedAt,
       'titles': [for (final t in titles) t.toJson()],
     }));
   }
 
+  /// キャッシュの対象（読む場所と目印が変わったら読み直す）
+  String get _scope => '${settings.videoRoots.join(',')}|${settings.folderPrefix.trim()}';
+
   bool _cancel = false;
   void cancel() => _cancel = true;
+
+  /// 読めなかったフォルダ（スキャンは止めずに続けた）
+  List<String> skipped = const [];
 
   Future<void> scan() async {
     if (scanning) return;
@@ -74,24 +80,42 @@ class Library extends ChangeNotifier {
     error = null;
     needOtp = false;
     _cancel = false;
+    skipped = const [];
     status = 'NAS につないでいます…';
     notifyListeners();
+    final firstTime = titles.isEmpty;
+    var lastShown = 0;
     try {
       final src = source;
       await src.check();
-      final sc = Scanner(src.list, src.read,
+      late final Scanner sc;
+      sc = Scanner(src.list, src.read,
           onProgress: (dir, n) {
             status = '$n 作品 … ${dir.length > 40 ? '…${dir.substring(dir.length - 40)}' : dir}';
+            // 初めてのときは、見つけた作品から順に見せる（2 秒ごと）
+            final now = DateTime.now().millisecondsSinceEpoch;
+            if (firstTime && now - lastShown > 2000) {
+              lastShown = now;
+              titles = sc.found;
+            }
             notifyListeners();
           },
           cancelled: () => _cancel);
-      final found = await sc.scan(settings.videoRoot);
+      final found = await sc.scan(settings.videoRoots, prefix: settings.folderPrefix);
+      skipped = List.of(sc.errors);
       if (!_cancel) {
         titles = found;
         scannedAt = DateTime.now().millisecondsSinceEpoch;
         await _saveCache();
         status = '${titles.length} 作品';
+        if (found.isEmpty && settings.folderPrefix.trim().isNotEmpty) {
+          error = '「${settings.folderPrefix.trim()}」で始まるフォルダが ${settings.videoRoots.join('・')} にありません'
+              '（設定の「読むフォルダの目印」）';
+        } else if (skipped.isNotEmpty) {
+          error = '${skipped.length} か所のフォルダが読めませんでした（ほかは読み込み済み。⟳ でもう一度）';
+        }
       } else {
+        if (firstTime) titles = sc.found;
         status = '中止しました';
       }
     } on OtpRequired catch (e) {

@@ -60,7 +60,7 @@ void main() {
     final s = await settings();
     s.did = 'did-abc';
     final src = DsmSource(s);
-    final titles = await Scanner(src.list, src.read).scan('/video');
+    final titles = await Scanner(src.list, src.read).scan(['/video']);
     final t = titles.single;
     expect(t.kind, TitleKind.series);
     expect(t.info.title, '〇〇');

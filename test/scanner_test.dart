@@ -69,7 +69,34 @@ void main() {
 
   late List<Title> titles;
   setUpAll(() async {
-    titles = await Scanner(tree.list, tree.read).scan('/video');
+    titles = await Scanner(tree.list, tree.read).scan(['/video']);
+  });
+
+  test('目印（⑧）で始まるフォルダだけ。棚の名前は目印を外したもの', () async {
+    final t = FakeTree({
+      '/8Tube/⑧アニメ/〇〇 (2019)/Season 01/〇〇 S01E01.mkv': '',
+      '/8Tube/⑧アニメ/〇〇 (2019)/Season 01/〇〇 S01E02.mkv': '',
+      '/8Tube/⑧ 映画/A (2000)/A (2000).mkv': '',
+      '/8Tube/\$StreamFab2/x/y.mp4': '',
+      '/8Tube/ばらばら.mp4': '',
+    });
+    final r = await Scanner(t.list, t.read).scan(['/8Tube'], prefix: '⑧');
+    expect({for (final x in r) x.shelf}, {'アニメ', '映画'});
+    expect(r.firstWhere((x) => x.name == '〇〇').kind, TitleKind.series);
+  });
+
+  test('読めないフォルダは飛ばして続ける', () async {
+    final t = FakeTree({
+      '/video/映画/A (2000)/A (2000).mkv': '',
+      '/video/映画/B (2001)/B (2001).mkv': '',
+    });
+    final sc = Scanner((dir) {
+      if (dir.endsWith('A (2000)')) throw Exception('Connection closed');
+      return t.list(dir);
+    }, t.read);
+    final r = await sc.scan(['/video']);
+    expect([for (final x in r) x.name], ['B']);
+    expect(sc.errors.single, contains('A (2000)'));
   });
 
   Title by(String name) => titles.firstWhere((t) => t.name == name);

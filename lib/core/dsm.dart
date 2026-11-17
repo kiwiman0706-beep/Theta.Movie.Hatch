@@ -49,14 +49,24 @@ class DsmSource implements MediaSource {
     _apis = null;
   }
 
-  Future<Map<String, dynamic>> _postJson(String url, Map<String, String> form, {Duration? timeout}) async {
-    final http.Response res;
-    try {
-      res = await _c.post(Uri.parse(url), body: form).timeout(timeout ?? const Duration(seconds: 20));
-    } on TimeoutException {
-      throw SourceException('NAS が応答しません（Tailscale はつながっていますか？）');
-    } catch (e) {
-      throw SourceException('NAS につながりません: $e');
+  /// つながらない・途中で切れた（Tailscale の揺れ、DSM が接続を閉じた）ときは、少し待って 3 回までやり直す
+  Future<Map<String, dynamic>> _postJson(String url, Map<String, String> form, {Duration? timeout, int tries = 3}) async {
+    http.Response? res;
+    for (var i = 0;; i++) {
+      try {
+        res = await _c.post(Uri.parse(url), body: form).timeout(timeout ?? const Duration(seconds: 20));
+        if (res.statusCode >= 500 && i + 1 < tries) {
+          await Future<void>.delayed(Duration(milliseconds: 800 * (i + 1) * (i + 1)));
+          continue;
+        }
+        break;
+      } catch (e) {
+        if (i + 1 >= tries) {
+          if (e is TimeoutException) throw SourceException('NAS が応答しません（Tailscale はつながっていますか？）');
+          throw SourceException('NAS につながりません: $e');
+        }
+        await Future<void>.delayed(Duration(milliseconds: 800 * (i + 1) * (i + 1)));
+      }
     }
     if (res.statusCode != 200) throw SourceException('DSM HTTP ${res.statusCode}');
     try {
@@ -94,9 +104,9 @@ class DsmSource implements MediaSource {
     const q = {'api': 'SYNO.API.Info', 'version': '1', 'method': 'query', 'query': 'all'};
     Map<String, dynamic> info;
     try {
-      info = await _postJson('$base/webapi/query.cgi', q, timeout: const Duration(seconds: 8));
+      info = await _postJson('$base/webapi/query.cgi', q, timeout: const Duration(seconds: 8), tries: 2);
     } on SourceException {
-      info = await _postJson('$base/webapi/entry.cgi', q, timeout: const Duration(seconds: 8));
+      info = await _postJson('$base/webapi/entry.cgi', q, timeout: const Duration(seconds: 8), tries: 2);
     }
     _apis = info['data'] as Map<String, dynamic>?;
     if (_apis == null || !_apis!.containsKey('SYNO.API.Auth')) throw SourceException('DSM の応答ではありません');
@@ -121,7 +131,8 @@ class DsmSource implements MediaSource {
       p['device_name'] = 'ThetaMovieHatch';
     }
     _otp = null;
-    final r = await _postJson(_url('SYNO.API.Auth'), p);
+    // ログインはやり直さない（失敗が続くと NAS が一時的に拒否するため）
+    final r = await _postJson(_url('SYNO.API.Auth'), p, tries: 1);
     if (r['success'] != true) {
       final code = (r['error'] as Map?)?['code'] as int? ?? 0;
       if (code == 403 || code == 406) {

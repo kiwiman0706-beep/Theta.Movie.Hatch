@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../app.dart';
+import '../core/library.dart';
 import '../core/series.dart';
 import '../core/settings.dart';
 import '../core/source.dart';
@@ -24,6 +25,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _user = TextEditingController(text: _s.user);
   late final _pass = TextEditingController(text: _s.password);
   late final _root = TextEditingController(text: _s.videoRoot);
+  late final _prefix = TextEditingController(text: _s.folderPrefix);
+  late final Library _lib = AppScope.of(context).library;
   String _hub = '';
   String _version = '';
   String? _latest;
@@ -50,21 +53,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ..davUrl = _davUrl.text.trim()
       ..user = _user.text.trim()
       ..password = _pass.text
-      ..videoRoot = _normRoot(_root.text);
+      ..videoRoot = _root.text.trim().isEmpty ? '/video' : _s.videoRootsOf(_root.text).join(', ')
+      ..folderPrefix = _prefix.text.trim();
     if (changed) _s.did = '';
-    final lib = AppScope.of(context).library;
     await _s.save();
-    lib.resetSource();
-  }
-
-  static String _normRoot(String r) {
-    var s = r.trim();
-    if (s.isEmpty) return '/video';
-    if (!s.startsWith('/')) s = '/$s';
-    while (s.length > 1 && s.endsWith('/')) {
-      s = s.substring(0, s.length - 1);
-    }
-    return s;
+    _lib.resetSource();
   }
 
   Future<void> _test() async {
@@ -72,12 +65,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _busy = true;
       _result = '';
     });
-    final lib = AppScope.of(context).library;
+    final lib = _lib;
     await _apply();
     try {
       await lib.source.check();
-      final n = (await lib.source.list(_s.videoRoot)).length;
-      _result = 'つながりました（${_s.videoRoot} に $n 項目）';
+      final lines = <String>[];
+      final pre = _s.folderPrefix.trim().toLowerCase();
+      for (final root in _s.videoRoots) {
+        final dirs = (await lib.source.list(root)).where((e) => e.isDir).toList();
+        if (pre.isEmpty) {
+          lines.add('$root：フォルダ ${dirs.length} 個（全部を読む）');
+        } else {
+          final hit = [for (final d in dirs) if (d.name.toLowerCase().startsWith(pre)) d.name];
+          lines.add('$root：「${_s.folderPrefix.trim()}」のフォルダ ${hit.length} 個'
+              '${hit.isEmpty ? '' : '（${hit.take(8).join('・')}${hit.length > 8 ? '…' : ''}）'}');
+        }
+      }
+      _result = 'つながりました\n${lines.join('\n')}';
     } on OtpRequired catch (e) {
       if (!mounted) return;
       final code = await askOtp(context);
@@ -127,6 +131,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final p = HudScope.of(context);
     final services = AppScope.of(context);
+    _lib; // dispose で使うので先に取っておく
     InputDecoration deco(String label, [String? hint]) =>
         InputDecoration(labelText: label, hintText: hint, border: const OutlineInputBorder(), isDense: true);
     return Scaffold(
@@ -159,7 +164,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 10),
             TextField(controller: _pass, obscureText: true, decoration: deco('パスワード')),
             const SizedBox(height: 10),
-            TextField(controller: _root, decoration: deco('動画のフォルダ', '/video')),
+            TextField(controller: _root, decoration: deco('動画の共有フォルダ（複数はカンマで）', '/video')),
+            const SizedBox(height: 10),
+            TextField(controller: _prefix, decoration: deco('読むフォルダの目印（空なら全部）', '⑧')),
+            const SizedBox(height: 4),
+            Text(
+              '共有フォルダの直下で、名前が目印で始まるフォルダだけを読みます（Theta Book Hatch と同じ）。'
+              '例：⑧映画・⑧アニメ → 棚「映画」「アニメ」',
+              style: TextStyle(color: p.faint, fontSize: 11, height: 1.5),
+            ),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: [
               PillButton(icon: Icons.wifi_tethering, text: '接続を確かめる', primary: true, onTap: _busy ? null : _test),

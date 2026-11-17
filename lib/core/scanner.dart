@@ -22,7 +22,7 @@ class Scanner {
   void Function(String dir, int titles)? onProgress;
   bool Function()? cancelled;
 
-  Scanner(this.list, this.read, {this.concurrency = 4, this.readNfo = true, this.onProgress, this.cancelled});
+  Scanner(this.list, this.read, {this.concurrency = 3, this.readNfo = true, this.onProgress, this.cancelled});
 
   final _out = <Title>[];
   int _running = 0;
@@ -45,20 +45,66 @@ class Scanner {
 
   Future<List<Entry>> _ls(String dir) => _limit(() => list(dir));
 
-  Future<List<Title>> scan(String root) async {
+  /// 読めなかったフォルダ（つながらない・権限が無い）。全体は止めずに続ける
+  final errors = <String>[];
+
+  /// ここまでに見つけた作品（スキャン中の途中経過）
+  List<Title> get found => List.of(_out);
+
+  /// roots：共有フォルダ（例 /video、/8Tube）。prefix を入れると、その直下で名前が prefix で始まる
+  /// フォルダだけを棚として読む（Theta Book Hatch の「⑧」と同じ）。棚の名前は prefix を外したもの
+  Future<List<Title>> scan(List<String> roots, {String prefix = ''}) async {
     _out.clear();
-    final top = await _ls(root);
-    final shelves = top.where((e) => e.isDir && !isHiddenName(e.name)).toList();
-    final loose = top.where((e) => !e.isDir && isVideo(e.name)).toList();
-    for (final f in loose) {
-      _out.add(_looseTitle(f, '', ShelfKind.auto));
+    errors.clear();
+    final pre = prefix.trim().toLowerCase();
+    for (final root in roots) {
+      if (cancelled?.call() ?? false) break;
+      final List<Entry> top;
+      try {
+        top = await _ls(root);
+      } catch (e) {
+        if (roots.length == 1) rethrow; // 共有フォルダそのものが読めないなら、接続か設定の問題
+        errors.add('$root: $e');
+        continue;
+      }
+      final dirs = top.where((e) => e.isDir && !isHiddenName(e.name));
+      if (pre.isEmpty) {
+        for (final f in top.where((e) => !e.isDir && isVideo(e.name))) {
+          _out.add(_looseTitle(f, '', ShelfKind.auto));
+        }
+        await Future.wait([for (final s in dirs) _group(s.path, s.name, shelfKindOf(s.name), 0)]);
+      } else {
+        final shelves = dirs.where((e) => e.name.toLowerCase().startsWith(pre));
+        await Future.wait([
+          for (final s in shelves)
+            () {
+              final name = shelfName(s.name, prefix);
+              return _group(s.path, name, shelfKindOf(name), 0);
+            }(),
+        ]);
+      }
     }
-    await Future.wait([for (final s in shelves) _group(s.path, s.name, shelfKindOf(s.name), 0)]);
     _out.sort((a, b) => naturalCompare(a.displayName, b.displayName));
     return List.of(_out);
   }
 
+  /// 「⑧アニメ」→「アニメ」
+  static String shelfName(String folder, String prefix) {
+    final p = prefix.trim();
+    var s = p.isNotEmpty && folder.toLowerCase().startsWith(p.toLowerCase()) ? folder.substring(p.length) : folder;
+    s = s.replaceFirst(RegExp(r'^[\s_\-・.]+'), '');
+    return s.isEmpty ? folder : s;
+  }
+
   Future<void> _group(String dir, String shelf, ShelfKind hint, int depth) async {
+    try {
+      await _groupBody(dir, shelf, hint, depth);
+    } catch (e) {
+      errors.add('$dir: $e');
+    }
+  }
+
+  Future<void> _groupBody(String dir, String shelf, ShelfKind hint, int depth) async {
     if (cancelled?.call() ?? false) return;
     final children = await _ls(dir);
     final videos = children.where((e) => !e.isDir && isVideo(e.name)).toList();
@@ -82,6 +128,14 @@ class Scanner {
 
   /// フォルダ 1 つを作品として読む。作品でなければ、まとまりとして中を見る
   Future<void> _folder(Entry dir, String shelf, ShelfKind hint, int depth) async {
+    try {
+      await _folderBody(dir, shelf, hint, depth);
+    } catch (e) {
+      errors.add('${dir.path}: $e');
+    }
+  }
+
+  Future<void> _folderBody(Entry dir, String shelf, ShelfKind hint, int depth) async {
     if (cancelled?.call() ?? false) return;
     final ch = await _ls(dir.path);
     final videos = ch.where((e) => !e.isDir && isVideo(e.name)).toList()..sort((a, b) => naturalCompare(a.name, b.name));

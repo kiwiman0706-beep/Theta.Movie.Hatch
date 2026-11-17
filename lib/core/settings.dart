@@ -19,8 +19,29 @@ class AppSettings extends ChangeNotifier {
   String password = '';
   String did = ''; // 2 段階認証のデバイストークン（次から確認コードを省く）
 
-  /// 動画の共有フォルダ（THETA_LIBRARY_SPEC.md §1。既定 /video）
+  /// 動画の共有フォルダ（THETA_LIBRARY_SPEC.md §1。既定 /video）。複数はカンマか改行で区切る
   String videoRoot = '/video';
+
+  /// 読むフォルダの目印（接頭辞）。共有フォルダの直下で、名前がこれで始まるフォルダだけを読む。
+  /// Theta Book Hatch と同じ（既定 ⑧）。空なら共有フォルダの全部
+  String folderPrefix = '⑧';
+
+  List<String> get videoRoots => videoRootsOf(videoRoot);
+
+  List<String> videoRootsOf(String text) => [
+        for (final r in text.split(RegExp(r'[,、\n]')))
+          if (r.trim().isNotEmpty) normRoot(r),
+      ];
+
+  static String normRoot(String r) {
+    var s = r.trim();
+    if (s.isEmpty) return '/video';
+    if (!s.startsWith('/')) s = '/$s';
+    while (s.length > 1 && s.endsWith('/')) {
+      s = s.substring(0, s.length - 1);
+    }
+    return s;
+  }
 
   /// シリーズのスキン（ui.skin）。followSeriesSkin のとき Home の値に追従
   String skin = 'system';
@@ -38,6 +59,7 @@ class AppSettings extends ChangeNotifier {
     davUrl = _p.getString('davUrl') ?? '';
     user = _p.getString('user') ?? '';
     videoRoot = _p.getString('videoRoot') ?? '/video';
+    folderPrefix = _p.getString('folderPrefix') ?? '⑧';
     skin = _p.getString('skin') ?? 'system';
     followSeriesSkin = _p.getBool('followSeriesSkin') ?? true;
     doneMarginSec = _p.getInt('doneMarginSec') ?? 120;
@@ -59,6 +81,7 @@ class AppSettings extends ChangeNotifier {
     await _p.setString('davUrl', davUrl);
     await _p.setString('user', user);
     await _p.setString('videoRoot', videoRoot);
+    await _p.setString('folderPrefix', folderPrefix);
     await _p.setString('skin', skin);
     await _p.setBool('followSeriesSkin', followSeriesSkin);
     await _p.setInt('doneMarginSec', doneMarginSec);

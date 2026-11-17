@@ -7,7 +7,14 @@
 - DSM の真似（`test/fake_dsm.py`）との結合：2 段階認証（コード違い → 正しいコード → デバイストークンで次から省ける）、File Station の一覧、NFO の読み取り、再生用 URL の Range（206）
 - `flutter build apk --release --target-platform android-arm,android-arm64`（デバッグ鍵）：`app.thetahatch.movie`・0.1.0、60.9MB（ARM だけ）
 
+## 実機で分かったこと
+
+- 0.1.0（Galaxy、Tailscale、`/8Tube`）：1031 作品まで読んだところで `ClientException`（通信が切れた）でスキャン全体が止まった
+  → 0.1.1 で、通信のやり直し（3 回）・読めないフォルダは飛ばす・目印（⑧）で読む範囲を絞る・同時に読む数を 4 → 3
+
 ## 未確認（実機で確かめる）
+
+- [ ] 0.1.1：⑧ のフォルダだけを読み、最後まで終わる。読めなかったフォルダがあれば一覧に出る
 
 - [ ] 本物の DSM 7 の File Station で、再生用 URL（`SYNO.FileStation.Download`・`mode=open`）が Range に応えて、シーク・続きからが効く
 - [ ] Tailscale 経由で 10 分以上止まらずに再生できる（Video Station の裏技で止まっていた症状）
