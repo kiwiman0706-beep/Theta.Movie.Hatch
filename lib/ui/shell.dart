@@ -129,8 +129,12 @@ class _ShellState extends State<Shell> implements Nav {
   int _tab = -1;
   late MenuScreen _modes;
 
+  /// いちばん上（モードの一覧）で MENU を押して、左のタブを文字付きに広げている（Music Hatch 1.7.0）
+  bool _railOpen = false;
+
   void _selectTab(int i, {bool animate = true}) {
     _focusNow = false;
+    _railOpen = false;
     void go() {
       _forward = true;
       for (final s in _stack) {
@@ -191,9 +195,17 @@ class _ShellState extends State<Shell> implements Nav {
     final top = _top;
     final list = top is MenuScreen && top.items.isNotEmpty;
     return WheelGuide(
-      menu: _stack.length > 1 ? '上の階層へ' : (services.playback.hasMedia ? '再生中へ' : null),
+      menu: _stack.length > 1
+          ? '上の階層へ'
+          : !_railOpen && !services.settings.tabLabels
+          ? 'タブを広げる'
+          : services.playback.hasMedia
+          ? '再生中へ'
+          : (_railOpen ? 'タブをたたむ' : null),
       center: list ? 'SELECT' : null,
-      centerHold: services.playback.hasMedia ? '長押し 全画面' : (list && top.items[top.selected].onLong != null ? '長押し 見た' : null),
+      centerHold: services.playback.hasMedia
+          ? '長押し 全画面'
+          : (list && top.items[top.selected].onLong != null ? '長押し 見た' : null),
       ring: list ? '←  SELECT  →' : null,
     );
   }
@@ -240,8 +252,13 @@ class _ShellState extends State<Shell> implements Nav {
           _setFocusNow(false);
         } else if (_stack.length > 1) {
           pop();
+        } else if (!_railOpen && !services.settings.tabLabels) {
+          setState(() => _railOpen = true); // いちばん上 → 左のタブを文字付きに広げる
         } else if (pb.hasMedia) {
-          _setFocusNow(true);
+          _railOpen = false;
+          _setFocusNow(true); // もう一度 MENU → 再生中へ
+        } else if (_railOpen) {
+          setState(() => _railOpen = false);
         }
       case WheelButton.select:
         if (_nowFocused) {
@@ -294,10 +311,12 @@ class _ShellState extends State<Shell> implements Nav {
   Future<void> _openFullscreen() async {
     if (_fullscreen || !services.playback.hasMedia) return;
     _fullscreen = true;
-    await Navigator.of(context).push(PageRouteBuilder<void>(
-      pageBuilder: (_, _, _) => const FullscreenPlayer(),
-      transitionsBuilder: (_, a, _, child) => FadeTransition(opacity: a, child: child),
-    ));
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        pageBuilder: (_, _, _) => const FullscreenPlayer(),
+        transitionsBuilder: (_, a, _, child) => FadeTransition(opacity: a, child: child),
+      ),
+    );
     _fullscreen = false;
   }
 
@@ -327,14 +346,14 @@ class _ShellState extends State<Shell> implements Nav {
       centerEdge: p.accent,
     );
     Widget wheel(double size) => ClickWheel(
-          size: size,
-          colors: wheelColors,
-          onTick: _onTick,
-          onButton: _onButton,
-          onHoldStart: _holdStart,
-          onHoldEnd: _holdEnd,
-          guide: _guide,
-        );
+      size: size,
+      colors: wheelColors,
+      onTick: _onTick,
+      onButton: _onButton,
+      onHoldStart: _holdStart,
+      onHoldEnd: _holdEnd,
+      guide: _guide,
+    );
     final mq = MediaQuery.of(context);
     // スマホを横にしたら全画面（縦に戻すと全画面の方が閉じる）
     if (_phone && mq.orientation == Orientation.landscape && services.playback.hasMedia && !_fullscreen) {
@@ -357,51 +376,55 @@ class _ShellState extends State<Shell> implements Nav {
           body: CustomPaint(
             painter: BackdropPainter(p),
             child: SafeArea(
-              child: LayoutBuilder(builder: (context, c) {
-                final list = _list(p);
-                Widget nowPanel() => NowPanel(
-                      focused: _nowFocused,
-                      mode: _nowMode,
-                      idlePoster: _top.poster,
-                      onTap: () => _setFocusNow(true),
-                      onDoubleTap: _openFullscreen,
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final list = _list(p);
+                  Widget nowPanel() => NowPanel(
+                    focused: _nowFocused,
+                    mode: _nowMode,
+                    idlePoster: _top.poster,
+                    onTap: () => _setFocusNow(true),
+                    onDoubleTap: _openFullscreen,
+                  );
+                  // 横並びにするか（Music Hatch 1.7.0 と同じ）：Auto は幅 600 以上で、幅 ≥ 高さ × 0.75
+                  // （Z Fold を広げた画面・タブレットの横）。縦に持ったスマホ・タブレットは縦並び。設定で Wide・Tall に固定できる
+                  final layout = services.settings.thetaLayout;
+                  final wide =
+                      layout == 'wide' || (layout == 'auto' && c.maxWidth >= 600 && c.maxWidth >= c.maxHeight * 0.75);
+                  if (wide) {
+                    final right = min(c.maxWidth * 0.44, 560.0);
+                    final w = min(right - 40, c.maxHeight * 0.42);
+                    return Row(
+                      children: [
+                        Expanded(child: list),
+                        SizedBox(
+                          width: right,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 10, 12, 10),
+                            child: Column(children: [nowPanel(), const Spacer(), wheel(w), const SizedBox(height: 12)]),
+                          ),
+                        ),
+                      ],
                     );
-                if (c.maxWidth >= 600) {
-                  // 幅のある画面（Z Fold を広げたとき・タブレット・PC）：左に一覧、右に動画とホイール。
-                  // 縦長でも、幅いっぱいの 16:9 だと一覧が押しつぶされるので、横に並べる
-                  final right = min(c.maxWidth * (c.maxWidth > c.maxHeight ? 0.45 : 0.44), 560.0);
-                  final w = min(right - 40, c.maxHeight * 0.42);
-                  return Row(children: [
-                    Expanded(child: list),
-                    SizedBox(
-                      width: right,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 10, 12, 10),
-                        child: Column(children: [
-                          nowPanel(),
-                          const Spacer(),
-                          wheel(w),
-                          const SizedBox(height: 12),
-                        ]),
+                  }
+                  // 縦向き：上に一覧、下に動画とホイール
+                  final w = min(c.maxWidth * 0.58, c.maxHeight * 0.26);
+                  return Column(
+                    children: [
+                      Expanded(child: list),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+                        // 動画のパネルは高さの 3 割まで（一覧を残す）
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: c.maxHeight * 0.3),
+                          child: Center(child: nowPanel()),
+                        ),
                       ),
-                    ),
-                  ]);
-                }
-                // 縦向き：上に一覧、下に動画とホイール
-                final w = min(c.maxWidth * 0.58, c.maxHeight * 0.26);
-                return Column(children: [
-                  Expanded(child: list),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-                    // 動画のパネルは高さの 3 割まで（一覧を残す）
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: c.maxHeight * 0.3),
-                      child: Center(child: nowPanel()),
-                    ),
-                  ),
-                  Padding(padding: const EdgeInsets.only(bottom: 10), child: wheel(w)),
-                ]);
-              }),
+                      Padding(padding: const EdgeInsets.only(bottom: 10), child: wheel(w)),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -422,159 +445,222 @@ class _ShellState extends State<Shell> implements Nav {
         borderRadius: p.rounded ? BorderRadius.circular(p.radius) : null,
       ),
       clipBehavior: p.rounded ? Clip.antiAlias : Clip.none,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 6, 12, 6),
-          child: Row(children: [
-            SizedBox(
-              width: 40,
-              height: 36,
-              child: depth > 1
-                  ? IconButton(
-                      padding: EdgeInsets.zero,
-                      tooltip: '戻る（MENU）',
-                      onPressed: pop,
-                      icon: Icon(Icons.chevron_left, color: p.accent),
-                    )
-                  : Center(child: Container(width: 6, height: 6, color: p.accent)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 6, 12, 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 40,
+                  height: 36,
+                  child: depth > 1
+                      ? IconButton(
+                          padding: EdgeInsets.zero,
+                          tooltip: '戻る（MENU）',
+                          onPressed: pop,
+                          icon: Icon(Icons.chevron_left, color: p.accent),
+                        )
+                      : Center(child: Container(width: 6, height: 6, color: p.accent)),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        depth > 2 ? 'LIB.$code / ${depth - 2}' : 'LIB.$code',
+                        style: TextStyle(color: p.faint, fontSize: 10, letterSpacing: 2, fontFamily: p.mono),
+                      ),
+                      Text(
+                        top.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: p.fg,
+                          fontSize: 20,
+                          height: 1.2,
+                          fontFamily: p.display,
+                          fontWeight: p.pop ? FontWeight.bold : FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (services.library.scanning)
+                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent)),
+              ],
             ),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(depth > 2 ? 'LIB.$code / ${depth - 2}' : 'LIB.$code',
-                    style: TextStyle(color: p.faint, fontSize: 10, letterSpacing: 2, fontFamily: p.mono)),
-                Text(top.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        color: p.fg,
-                        fontSize: 20,
-                        height: 1.2,
-                        fontFamily: p.display,
-                        fontWeight: p.pop ? FontWeight.bold : FontWeight.w400)),
-              ]),
-            ),
-            if (services.library.scanning)
-              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent)),
-          ]),
-        ),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Stripes(color: p.line)),
-        const SizedBox(height: 4),
-        Expanded(
-          child: ClipRect(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              layoutBuilder: (cur, prev) => Stack(children: [...prev, ?cur]),
-              transitionBuilder: (child, anim) {
-                final incoming = child.key == top.key;
-                final begin = incoming ? Offset(_forward ? 1 : -1, 0) : Offset(_forward ? -1 : 1, 0);
-                return SlideTransition(position: Tween(begin: begin, end: Offset.zero).animate(anim), child: child);
-              },
-              child: KeyedSubtree(
-                key: top.key,
-                child: ListenableBuilder(listenable: top, builder: (context, _) => top.build(context)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Stripes(color: p.line),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: ClipRect(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                layoutBuilder: (cur, prev) => Stack(children: [...prev, ?cur]),
+                transitionBuilder: (child, anim) {
+                  final incoming = child.key == top.key;
+                  final begin = incoming ? Offset(_forward ? 1 : -1, 0) : Offset(_forward ? -1 : 1, 0);
+                  return SlideTransition(
+                    position: Tween(begin: begin, end: Offset.zero).animate(anim),
+                    child: child,
+                  );
+                },
+                child: KeyedSubtree(
+                  key: top.key,
+                  child: ListenableBuilder(listenable: top, builder: (context, _) => top.build(context)),
+                ),
               ),
             ),
           ),
-        ),
-      ]),
+        ],
+      ),
     );
+    // いちばん上の階層でタブを文字付きに広げたら、タブだけでモードを選ぶ（同じ一覧を 2 つ出さない。Music Hatch 1.7.1）
+    final labels = services.settings.tabLabels || _railOpen;
+    final full = _tab < 0 && labels;
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // いちばん上（モードの一覧）では、細いタブの代わりに一覧そのものが名前の読めるメニューになる
-        if (_tab >= 0) ThetaTabs(tabs: _tabs, active: _tab, onSelect: _selectTab),
-        Expanded(
-          // 一覧を触ったら、ホイールのフォーカスも一覧へ
-          child: Listener(
-            onPointerDown: (_) => _setFocusNow(false),
-            child: CustomPaint(
-              foregroundPainter: p.rounded ? null : CornersPainter(_nowFocused ? p.line : p.accent),
-              child: _withToast(panel, p),
-            ),
-          ),
+      child: LayoutBuilder(
+        builder: (context, c) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (full)
+              Expanded(
+                child: Listener(
+                  onPointerDown: (_) => _setFocusNow(false),
+                  child: _withToast(
+                    // ホイールで選んでいるモード（_modes.selected）を光らせる。SELECT・タップで開く
+                    ThetaTabs(tabs: _tabs, active: _modes.selected, width: c.maxWidth, onSelect: _selectTab),
+                    p,
+                  ),
+                ),
+              )
+            else ...[
+              ThetaTabs(tabs: _tabs, active: _tab, width: labels ? 116 : 40, onSelect: _selectTab),
+              Expanded(
+                // 一覧を触ったら、ホイールのフォーカスも一覧へ
+                child: Listener(
+                  onPointerDown: (_) => _setFocusNow(false),
+                  child: CustomPaint(
+                    foregroundPainter: p.rounded ? null : CornersPainter(_nowFocused ? p.line : p.accent),
+                    child: _withToast(panel, p),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
-      ]),
+      ),
     );
   }
 
   Widget _withToast(Widget lcd, Palette p) {
-    return Stack(children: [
-      Positioned.fill(child: lcd),
-      if (_toast != null)
-        Positioned(
-          left: 16,
-          right: 16,
-          bottom: 14,
-          child: Center(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: p.raised,
-                border: Border.all(color: p.accent),
-                borderRadius: BorderRadius.circular(p.rounded ? 8 : 0),
-              ),
-              child: Text(_toast!,
+    return Stack(
+      children: [
+        Positioned.fill(child: lcd),
+        if (_toast != null)
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 14,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: p.raised,
+                  border: Border.all(color: p.accent),
+                  borderRadius: BorderRadius.circular(p.rounded ? 8 : 0),
+                ),
+                child: Text(
+                  _toast!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: p.fg, fontSize: 13, fontWeight: FontWeight.w600, fontFamily: p.mono)),
+                  style: TextStyle(color: p.fg, fontSize: 13, fontWeight: FontWeight.w600, fontFamily: p.mono),
+                ),
+              ),
             ),
           ),
-        ),
-    ]);
+      ],
+    );
   }
 }
 
-/// 一覧の左に付く縦のタブ（Theta Music Hatch と同じ。低いときは印だけ）
+/// 一覧の左に付く縦のタブ（Theta Music Hatch 1.7.1 の ThetaTabs と同じ考え方）。
+/// 幅 40 は印だけ（高ければ縦書き）、90 以上で印と名前を横に並べる。いちばん上の階層で広げたときは
+/// リストの場所いっぱい（モードの一覧の代わり）。棚が多くて低くなりすぎるときは、高さを保ってスクロール
 class ThetaTabs extends StatelessWidget {
   final List<ThetaTab> tabs;
   final int active;
   final void Function(int) onSelect;
-  const ThetaTabs({super.key, required this.tabs, required this.active, required this.onSelect});
+  final double width;
+  const ThetaTabs({super.key, required this.tabs, required this.active, required this.onSelect, this.width = 40});
 
   @override
   Widget build(BuildContext context) {
     final p = HudScope.of(context);
     double gap(int i) => i == 0 ? 0 : (tabs[i].group != tabs[i - 1].group ? 10 : 4);
-    return SizedBox(
-      width: 40,
-      child: LayoutBuilder(builder: (context, c) {
-        // 棚が多くて 1 つが低くなりすぎるとき（印も字も読めない）は、高さを保ってスクロールにする
-        const minH = 72.0;
-        final gaps = [for (var i = 0; i < tabs.length; i++) gap(i)].fold<double>(0, (a, b) => a + b);
-        if ((c.maxHeight - gaps) / tabs.length >= minH) {
-          return Column(children: [
-            for (var i = 0; i < tabs.length; i++) ...[
-              if (i > 0) SizedBox(height: gap(i)),
-              Expanded(child: _tab(p, i)),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      width: width,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          // 横書き（印＋名前）なら 1 行の高さで足りる。縦書きは字が収まる高さが要る
+          final minH = c.maxWidth >= 90 ? (c.maxWidth >= 200 ? 52.0 : 44.0) : 72.0;
+          final gaps = [for (var i = 0; i < tabs.length; i++) gap(i)].fold<double>(0, (a, b) => a + b);
+          if ((c.maxHeight - gaps) / tabs.length >= minH) {
+            return Column(
+              children: [
+                for (var i = 0; i < tabs.length; i++) ...[
+                  if (i > 0) SizedBox(height: gap(i)),
+                  Expanded(child: _tab(p, i)),
+                ],
+              ],
+            );
+          }
+          return ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              for (var i = 0; i < tabs.length; i++) ...[
+                if (i > 0) SizedBox(height: gap(i)),
+                // ホイールで選んでいるタブが見えるように
+                SizedBox(
+                  height: minH,
+                  child: i == active ? _Visible(child: _tab(p, i)) : _tab(p, i),
+                ),
+              ],
             ],
-          ]);
-        }
-        return ListView(padding: EdgeInsets.zero, children: [
-          for (var i = 0; i < tabs.length; i++) ...[
-            if (i > 0) SizedBox(height: gap(i)),
-            SizedBox(height: minH, child: _tab(p, i)),
-          ],
-        ]);
-      }),
+          );
+        },
+      ),
     );
   }
 
-  /// タブの字：英字は横に寝かせる。日本語（棚の名前）は縦に積む（4 字まで）
-  Widget _label(Palette p, ThetaTab t, Color fg) {
+  /// 縦書きの字：英字は横に寝かせる。日本語（棚の名前）は縦に積む（4 字まで）
+  Widget _vertical(Palette p, ThetaTab t, Color fg) {
     final ascii = RegExp(r'^[\x20-\x7E]+$').hasMatch(t.label);
     if (ascii) {
       return RotatedBox(
         quarterTurns: 3,
-        child: Text(t.label, style: TextStyle(fontSize: 12, letterSpacing: 1.5, fontFamily: p.mono, color: fg)),
+        child: Text(
+          t.label,
+          style: TextStyle(fontSize: 12, letterSpacing: 1.5, fontFamily: p.mono, color: fg),
+        ),
       );
     }
     final chars = t.label.characters.take(4).toList();
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      for (final ch in chars) Text(ch, style: TextStyle(fontSize: 13, height: 1.1, color: fg)),
-    ]);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [for (final ch in chars) Text(ch, style: TextStyle(fontSize: 13, height: 1.1, color: fg))],
+    );
   }
 
   Widget _tab(Palette p, int i) {
@@ -596,20 +682,86 @@ class ThetaTabs extends StatelessWidget {
             border: Border.all(color: on && !p.pop ? p.accent : p.line, width: p.lineWidth),
             borderRadius: shape,
           ),
-          child: Stack(children: [
-            Align(alignment: Alignment.centerRight, child: Container(width: 3, height: 18, color: on ? fg : g)),
-            LayoutBuilder(
-              builder: (context, c) => Center(
-                child: c.maxHeight < 64
-                    ? Icon(t.icon, size: 19, color: fg)
-                    : FittedBox(fit: BoxFit.scaleDown, child: _label(p, t, fg)),
+          child: Stack(
+            children: [
+              Align(
+                alignment: Alignment.centerRight,
+                child: Container(width: 3, height: 18, color: on ? fg : g),
               ),
-            ),
-          ]),
+              LayoutBuilder(
+                builder: (context, c) {
+                  if (c.maxWidth >= 90) {
+                    // 印と名前を横に（英字のタブは略号、棚は名前そのもの）
+                    final big = c.maxWidth >= 200;
+                    final ascii = RegExp(r'^[\x20-\x7E]+$').hasMatch(t.label);
+                    return Padding(
+                      padding: EdgeInsets.only(left: big ? 16 : 8, right: 8),
+                      child: Row(
+                        children: [
+                          Icon(t.icon, size: big ? 22 : 18, color: fg),
+                          SizedBox(width: big ? 12 : 6),
+                          Expanded(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                big ? t.title : (ascii ? t.label : t.title),
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: big ? 16 : 12,
+                                  letterSpacing: ascii && !big ? 1.2 : 0.5,
+                                  fontFamily: p.mono,
+                                  color: fg,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (big && t.count != null)
+                            Text(
+                              '${t.count}',
+                              style: TextStyle(fontSize: 12, fontFamily: p.mono, color: on ? fg : p.faint),
+                            ),
+                        ],
+                      ),
+                    );
+                  }
+                  return Center(
+                    child: c.maxWidth < 30 || c.maxHeight < 64
+                        ? Icon(t.icon, size: 19, color: fg)
+                        : FittedBox(fit: BoxFit.scaleDown, child: _vertical(p, t, fg)),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// 作られたら（選ぶ場所が変わったら）スクロールして見えるようにする
+class _Visible extends StatefulWidget {
+  final Widget child;
+  const _Visible({required this.child});
+  @override
+  State<_Visible> createState() => _VisibleState();
+}
+
+class _VisibleState extends State<_Visible> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 下にはみ出していれば下端に、上にはみ出していれば上端に合わせる（見えていれば動かさない）
+      Scrollable.ensureVisible(context, alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+      Scrollable.ensureVisible(context, alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 String _fmt(Duration d) => fmtDuration(d.inSeconds);
@@ -640,73 +792,98 @@ class NowPanel extends StatelessWidget {
 
     final Widget body;
     if (!pb.hasMedia) {
-      body = Stack(fit: StackFit.expand, children: [
-        if (idlePoster != null)
-          NasImage(idlePoster, key: ValueKey(idlePoster), fit: BoxFit.contain)
-        else
-          ColoredBox(color: p.raised, child: Icon(Icons.movie_outlined, size: 48, color: p.faint)),
-        Positioned(
-          left: 10,
-          bottom: 8,
-          child: Text('[ NOW ] 一覧から選んで中央ボタンで再生', style: label.copyWith(shadows: [Shadow(color: p.bg, blurRadius: 4)])),
-        ),
-      ]);
+      body = Stack(
+        fit: StackFit.expand,
+        children: [
+          if (idlePoster != null)
+            NasImage(idlePoster, key: ValueKey(idlePoster), fit: BoxFit.contain)
+          else
+            ColoredBox(
+              color: p.raised,
+              child: Icon(Icons.movie_outlined, size: 48, color: p.faint),
+            ),
+          Positioned(
+            left: 10,
+            bottom: 8,
+            child: Text(
+              '[ NOW ] 一覧から選んで中央ボタンで再生',
+              style: label.copyWith(shadows: [Shadow(color: p.bg, blurRadius: 4)]),
+            ),
+          ),
+        ],
+      );
     } else {
-      body = Stack(fit: StackFit.expand, children: [
-        ColoredBox(color: Colors.black, child: Video(controller: pb.video, controls: NoVideoControls)),
-        // 上：作品名と話。下：進み具合（回すとシーク／音量）
-        Positioned(
-          left: 0,
-          right: 0,
-          top: 0,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(10, 6, 10, 14),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Colors.black87, Colors.transparent],
+      body = Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(
+            color: Colors.black,
+            child: Video(controller: pb.video, controls: NoVideoControls),
+          ),
+          // 上：作品名と話。下：進み具合（回すとシーク／音量）
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 14),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black87, Colors.transparent],
+                ),
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    '[ NOW ]',
+                    style: TextStyle(color: p.accent, fontSize: 11, letterSpacing: 2, fontFamily: p.mono),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(pb.playing ? Icons.play_arrow : Icons.pause, size: 15, color: p.accent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${pb.title?.displayName ?? ''}  ${pb.episode == null ? '' : pb.label}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: Row(children: [
-              Text('[ NOW ]', style: TextStyle(color: p.accent, fontSize: 11, letterSpacing: 2, fontFamily: p.mono)),
-              const SizedBox(width: 6),
-              Icon(pb.playing ? Icons.play_arrow : Icons.pause, size: 15, color: p.accent),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text('${pb.title?.displayName ?? ''}  ${pb.episode == null ? '' : pb.label}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 12)),
-              ),
-            ]),
           ),
-        ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(10, 14, 10, 6),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [Colors.black87, Colors.transparent],
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 14, 10, 6),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Colors.black87, Colors.transparent],
+                ),
               ),
-            ),
-            child: _Progress(mode: mode, focused: focused),
-          ),
-        ),
-        if (pb.error != null)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text('再生できません：${pb.error}',
-                  textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 12)),
+              child: _Progress(mode: mode, focused: focused),
             ),
           ),
-      ]);
+          if (pb.error != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  '再生できません：${pb.error}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ),
+        ],
+      );
     }
 
     return GestureDetector(
@@ -742,13 +919,15 @@ class _Progress extends StatelessWidget {
     final pl = services.playback.player;
     final label = TextStyle(color: Colors.white70, fontSize: 11, fontFamily: p.mono, letterSpacing: 1);
     if (mode == NowMode.volume && focused) {
-      return Row(children: [
-        Icon(Icons.volume_down, size: 16, color: p.accent),
-        const SizedBox(width: 6),
-        Expanded(child: HudProgress(services.playback.volume)),
-        const SizedBox(width: 6),
-        Text('VOL ${(services.playback.volume * 100).round()}', style: label),
-      ]);
+      return Row(
+        children: [
+          Icon(Icons.volume_down, size: 16, color: p.accent),
+          const SizedBox(width: 6),
+          Expanded(child: HudProgress(services.playback.volume)),
+          const SizedBox(width: 6),
+          Text('VOL ${(services.playback.volume * 100).round()}', style: label),
+        ],
+      );
     }
     return StreamBuilder<Duration>(
       stream: pl.stream.position,
@@ -757,17 +936,23 @@ class _Progress extends StatelessWidget {
         final dur = pl.state.duration;
         final v = dur.inMilliseconds == 0 ? 0.0 : pos.inMilliseconds / dur.inMilliseconds;
         final remain = dur - pos;
-        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          HudProgress(v.clamp(0.0, 1.0)),
-          const SizedBox(height: 2),
-          Row(children: [
-            Text(_fmt(pos), style: label),
-            const Spacer(),
-            if (focused) Text('◀ SEEK ▶', style: label.copyWith(color: p.accent)),
-            const Spacer(),
-            Text('-${_fmt(remain.isNegative ? Duration.zero : remain)}', style: label),
-          ]),
-        ]);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            HudProgress(v.clamp(0.0, 1.0)),
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Text(_fmt(pos), style: label),
+                const Spacer(),
+                if (focused) Text('◀ SEEK ▶', style: label.copyWith(color: p.accent)),
+                const Spacer(),
+                Text('-${_fmt(remain.isNegative ? Duration.zero : remain)}', style: label),
+              ],
+            ),
+          ],
+        );
       },
     );
   }
@@ -818,19 +1003,26 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
     final picked = await showModalBottomSheet<int>(
       context: context,
       builder: (ctx) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          ListTile(title: Text(audio ? '音声（二か国語など）' : '字幕')),
-          for (final (i, t) in list.indexed)
-            ListTile(
-              leading: Icon((audio ? (t as AudioTrack).id : (t as SubtitleTrack).id) == cur
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off),
-              title: Text(audio
-                  ? name((t as AudioTrack).id, t.title, t.language)
-                  : name((t as SubtitleTrack).id, t.title, t.language)),
-              onTap: () => Navigator.of(ctx).pop(i),
-            ),
-        ]),
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            ListTile(title: Text(audio ? '音声（二か国語など）' : '字幕')),
+            for (final (i, t) in list.indexed)
+              ListTile(
+                leading: Icon(
+                  (audio ? (t as AudioTrack).id : (t as SubtitleTrack).id) == cur
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                ),
+                title: Text(
+                  audio
+                      ? name((t as AudioTrack).id, t.title, t.language)
+                      : name((t as SubtitleTrack).id, t.title, t.language),
+                ),
+                onTap: () => Navigator.of(ctx).pop(i),
+              ),
+          ],
+        ),
       ),
     );
     if (picked == null) return;
@@ -861,19 +1053,29 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
         onPressed: () => Navigator.of(context).maybePop(),
       ),
       Expanded(
-        child: Text('${pb.title?.displayName ?? ''}  ${pb.episode == null ? '' : pb.label}',
-            maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 14)),
+        child: Text(
+          '${pb.title?.displayName ?? ''}  ${pb.episode == null ? '' : pb.label}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
       ),
       IconButton(
-          tooltip: '音声',
-          icon: const Icon(Icons.audiotrack, color: Colors.white),
-          onPressed: () => _pickTrack(audio: true)),
+        tooltip: '音声',
+        icon: const Icon(Icons.audiotrack, color: Colors.white),
+        onPressed: () => _pickTrack(audio: true),
+      ),
       IconButton(
-          tooltip: '字幕',
-          icon: const Icon(Icons.subtitles, color: Colors.white),
-          onPressed: () => _pickTrack(audio: false)),
+        tooltip: '字幕',
+        icon: const Icon(Icons.subtitles, color: Colors.white),
+        onPressed: () => _pickTrack(audio: false),
+      ),
       if (pb.nextEpisode != null)
-        IconButton(tooltip: '次の話', icon: const Icon(Icons.skip_next, color: Colors.white), onPressed: pb.next),
+        IconButton(
+          tooltip: '次の話',
+          icon: const Icon(Icons.skip_next, color: Colors.white),
+          onPressed: pb.next,
+        ),
     ];
     final accent = Theme.of(context).colorScheme.primary;
     final mobileTheme = kDefaultMaterialVideoControlsThemeData.copyWith(
@@ -890,10 +1092,7 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
         child: MaterialDesktopVideoControlsTheme(
           normal: desktopTheme,
           fullscreen: desktopTheme,
-          child: Video(
-            controller: pb.video,
-            controls: _mobile ? MaterialVideoControls : MaterialDesktopVideoControls,
-          ),
+          child: Video(controller: pb.video, controls: _mobile ? MaterialVideoControls : MaterialDesktopVideoControls),
         ),
       ),
     );

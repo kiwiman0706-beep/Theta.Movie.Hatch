@@ -221,6 +221,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 16),
         HudPanel(
+          code: 'LAYOUT',
+          title: '画面の並べ方',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'auto', label: Text('自動')),
+                ButtonSegment(value: 'wide', label: Text('横並び')),
+                ButtonSegment(value: 'tall', label: Text('縦並び')),
+              ],
+              selected: {_s.thetaLayout},
+              onSelectionChanged: (v) async {
+                _s.thetaLayout = v.first;
+                await _s.save();
+                setState(() {});
+              },
+            ),
+            const SizedBox(height: 4),
+            Text('自動：幅 600 以上で、幅が高さの 3/4 以上なら横並び（Z Fold を広げたとき・タブレットの横）',
+                style: TextStyle(color: p.faint, fontSize: 11, height: 1.5)),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('左のタブに名前を出す'),
+              value: _s.tabLabels,
+              onChanged: (v) async {
+                _s.tabLabels = v;
+                await _s.save();
+                setState(() {});
+              },
+            ),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        HudPanel(
           code: 'WHEEL',
           title: 'ホイール',
           child: Column(children: [

@@ -71,8 +71,8 @@ void main() {
   }
 
   for (final (name, size) in [
-    ('phone', const Size(412, 915)),
-    ('fold_open', const Size(884, 1010)),
+    ('phone', const Size(400, 860)),
+    ('fold_open', const Size(757, 880)),
     ('tablet_landscape', const Size(1280, 800)),
   ]) {
     testWidgets('はみ出さない：$name', (tester) async {
@@ -94,6 +94,13 @@ void main() {
       }
       expect(tester.takeException(), isNull);
       await shoot(tester, '${name}_modes');
+      // タブに名前を出す：いちばん上ではタブがリストの場所いっぱいに（同じ一覧を 2 つ出さない）
+      services.settings.tabLabels = true;
+      await services.settings.save();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(tester.takeException(), isNull);
+      await shoot(tester, '${name}_modes_labels');
     });
   }
 }

@@ -16,7 +16,8 @@ class ThetaTab {
   final IconData icon;
   final int group; // 0 よく使う（accent）・1 ライブラリ（widget）・2 管理（launch）
   final IPodScreen Function() root;
-  const ThetaTab(this.label, this.title, this.icon, this.group, this.root);
+  final int? count; // 棚の作品数（広げたタブに出す）
+  const ThetaTab(this.label, this.title, this.icon, this.group, this.root, [this.count]);
 }
 
 String shelfCode(String shelf) => switch (shelf) {
@@ -46,7 +47,8 @@ List<ThetaTab> thetaTabs() => [
       ThetaTab('RESUME', '続きから', Icons.play_circle_outline, 0, () => _lib(resumeMenu)),
       ThetaTab('NEW', '最近追加', Icons.fiber_new_outlined, 0, () => _lib(recentMenu)),
       for (final s in services.library.shelves)
-        ThetaTab(shelfCode(s), s.isEmpty ? 'そのほか' : s, _shelfIcon(s), 1, () => shelfMenu(s)),
+        ThetaTab(shelfCode(s), s.isEmpty ? 'そのほか' : s, _shelfIcon(s), 1, () => shelfMenu(s),
+            services.library.onShelf(s).length),
       ThetaTab('SEARCH', '探す', Icons.search, 0, searchMenu),
       ThetaTab('SETUP', '設定', Icons.tune, 2, libraryMenu),
     ];
@@ -60,7 +62,7 @@ MenuScreen modeMenu(void Function(int) open) => MenuScreen(
           for (var i = 0; i < tabs.length; i++)
             MenuItem(tabs[i].title,
                 chevron: true,
-                detail: tabs[i].group == 1 ? '${services.library.onShelf(tabs[i].title == 'そのほか' ? '' : tabs[i].title).length}' : null,
+                detail: tabs[i].count == null ? null : '${tabs[i].count}',
                 onSelect: () => open(i)),
         ];
       },
@@ -311,11 +313,23 @@ MenuScreen libraryMenu() => MenuScreen(
                 nav.push(MenuScreen('読めなかったフォルダ', () => [for (final s in lib.skipped) MenuItem(s)]));
               }
             }),
+          MenuItem('画面の並べ方', detail: switch (services.settings.thetaLayout) { 'wide' => '横並び', 'tall' => '縦並び', _ => '自動' },
+              onSelect: () {
+            // 自動（幅で決める）→ 横並び → 縦並び
+            final st = services.settings;
+            st.thetaLayout = switch (st.thetaLayout) { 'auto' => 'wide', 'wide' => 'tall', _ => 'auto' };
+            st.save();
+          }),
+          MenuItem('タブに名前を出す', detail: services.settings.tabLabels ? 'オン' : 'オフ', onSelect: () {
+            final st = services.settings;
+            st.tabLabels = !st.tabLabels;
+            st.save();
+          }),
           MenuItem('接続・スキン・ホイールの設定', chevron: true, onSelect: () {
             Navigator.of(nav.context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
           }),
           if (services.playback.hasMedia) MenuItem('再生を止める', onSelect: services.playback.stop),
         ];
       },
-      deps: [services.library, services.playback],
+      deps: [services.library, services.playback, services.settings],
     );
