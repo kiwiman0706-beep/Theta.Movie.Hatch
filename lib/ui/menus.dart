@@ -28,7 +28,7 @@ String shelfCode(String shelf) => switch (shelf) {
       'ライブ' => 'LIVE',
       'ホームビデオ' => 'HOME',
       '' => 'OTHER',
-      _ => shelf.length > 6 ? shelf.substring(0, 6) : shelf,
+      _ => shelf, // 日本語の棚はタブに縦に 4 字まで
     };
 
 IconData _shelfIcon(String shelf) => switch (shelfKindOf(shelf)) {

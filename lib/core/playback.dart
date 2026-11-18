@@ -16,24 +16,30 @@ class Playback extends ChangeNotifier {
   final Library library;
   final Progress progress;
 
-  Playback(this.settings, this.library, this.progress) {
-    _subs.add(player.stream.playing.listen((_) => notifyListeners()));
-    _subs.add(player.stream.completed.listen((done) {
+  Playback(this.settings, this.library, this.progress);
+
+  /// mpv は初めて再生するときに作る（起動を軽く。テストでも画面を描けるように）
+  Player? _player;
+  Player get player => _player ??= _create();
+  late final VideoController video = VideoController(player);
+  final _subs = <StreamSubscription<dynamic>>[];
+
+  Player _create() {
+    final p = Player(configuration: const PlayerConfiguration(title: 'Theta Movie Hatch'));
+    _subs.add(p.stream.playing.listen((_) => notifyListeners()));
+    _subs.add(p.stream.completed.listen((done) {
       if (done) _ended();
     }));
-    _subs.add(player.stream.error.listen((e) {
+    _subs.add(p.stream.error.listen((e) {
       error = e;
       notifyListeners();
     }));
-    _subs.add(player.stream.position.listen((pos) {
+    _subs.add(p.stream.position.listen((pos) {
       if ((pos.inSeconds - _lastSaved).abs() >= 10) save();
     }));
-    _subs.add(player.stream.volume.listen((_) => notifyListeners()));
+    _subs.add(p.stream.volume.listen((_) => notifyListeners()));
+    return p;
   }
-
-  final Player player = Player(configuration: const PlayerConfiguration(title: 'Theta Movie Hatch'));
-  late final VideoController video = VideoController(player);
-  final _subs = <StreamSubscription<dynamic>>[];
 
   Title? title;
   VideoFile? file;
@@ -41,8 +47,8 @@ class Playback extends ChangeNotifier {
   int _lastSaved = 0;
 
   bool get hasMedia => file != null;
-  bool get playing => player.state.playing;
-  double get volume => player.state.volume / 100;
+  bool get playing => _player?.state.playing ?? false;
+  double get volume => (_player?.state.volume ?? 100) / 100;
 
   Episode? get episode => title?.episodes.where((e) => e.file.path == file?.path).firstOrNull;
 
@@ -86,9 +92,12 @@ class Playback extends ChangeNotifier {
     }
   }
 
-  Future<void> toggle() => player.playOrPause();
+  Future<void> toggle() async {
+    if (hasMedia) await player.playOrPause();
+  }
 
   Future<void> seekBy(Duration d) async {
+    if (!hasMedia) return;
     final st = player.state;
     var to = st.position + d;
     if (to < Duration.zero) to = Duration.zero;
@@ -96,7 +105,9 @@ class Playback extends ChangeNotifier {
     await player.seek(to);
   }
 
-  Future<void> changeVolume(double delta) => player.setVolume(((volume + delta).clamp(0.0, 1.0)) * 100);
+  Future<void> changeVolume(double delta) async {
+    if (hasMedia) await player.setVolume(((volume + delta).clamp(0.0, 1.0)) * 100);
+  }
 
   Future<void> next() async {
     final n = nextEpisode;
@@ -105,6 +116,7 @@ class Playback extends ChangeNotifier {
 
   /// 前の話。始まって 5 秒を過ぎていたら、その話の頭へ（iPod と同じ）
   Future<void> previous() async {
+    if (!hasMedia) return;
     if (player.state.position.inSeconds > 5) return player.seek(Duration.zero);
     final p = previousEpisode;
     if (p != null) await play(title!, p.file, fromStart: true);
@@ -112,7 +124,7 @@ class Playback extends ChangeNotifier {
 
   Future<void> stop() async {
     await save();
-    await player.stop();
+    await _player?.stop();
     title = null;
     file = null;
     notifyListeners();
@@ -145,7 +157,7 @@ class Playback extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
-    player.dispose();
+    _player?.dispose();
     super.dispose();
   }
 }

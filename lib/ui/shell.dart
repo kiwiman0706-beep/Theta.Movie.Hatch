@@ -366,9 +366,10 @@ class _ShellState extends State<Shell> implements Nav {
                       onTap: () => _setFocusNow(true),
                       onDoubleTap: _openFullscreen,
                     );
-                if (c.maxWidth > c.maxHeight && c.maxWidth >= 600) {
-                  // 横向き（タブレット・PC）：左に一覧、右に動画とホイール
-                  final right = min(c.maxWidth * 0.45, 560.0);
+                if (c.maxWidth >= 600) {
+                  // 幅のある画面（Z Fold を広げたとき・タブレット・PC）：左に一覧、右に動画とホイール。
+                  // 縦長でも、幅いっぱいの 16:9 だと一覧が押しつぶされるので、横に並べる
+                  final right = min(c.maxWidth * (c.maxWidth > c.maxHeight ? 0.45 : 0.44), 560.0);
                   final w = min(right - 40, c.maxHeight * 0.42);
                   return Row(children: [
                     Expanded(child: list),
@@ -380,7 +381,7 @@ class _ShellState extends State<Shell> implements Nav {
                           nowPanel(),
                           const Spacer(),
                           wheel(w),
-                          const Spacer(),
+                          const SizedBox(height: 12),
                         ]),
                       ),
                     ),
@@ -390,7 +391,14 @@ class _ShellState extends State<Shell> implements Nav {
                 final w = min(c.maxWidth * 0.58, c.maxHeight * 0.26);
                 return Column(children: [
                   Expanded(child: list),
-                  Padding(padding: const EdgeInsets.fromLTRB(12, 4, 12, 6), child: nowPanel()),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+                    // 動画のパネルは高さの 3 割まで（一覧を残す）
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: c.maxHeight * 0.3),
+                      child: Center(child: nowPanel()),
+                    ),
+                  ),
                   Padding(padding: const EdgeInsets.only(bottom: 10), child: wheel(w)),
                 ]);
               }),
@@ -475,7 +483,8 @@ class _ShellState extends State<Shell> implements Nav {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 10, 8, 4),
       child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        ThetaTabs(tabs: _tabs, active: _tab, onSelect: _selectTab),
+        // いちばん上（モードの一覧）では、細いタブの代わりに一覧そのものが名前の読めるメニューになる
+        if (_tab >= 0) ThetaTabs(tabs: _tabs, active: _tab, onSelect: _selectTab),
         Expanded(
           // 一覧を触ったら、ホイールのフォーカスも一覧へ
           child: Listener(
@@ -528,15 +537,44 @@ class ThetaTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = HudScope.of(context);
+    double gap(int i) => i == 0 ? 0 : (tabs[i].group != tabs[i - 1].group ? 10 : 4);
     return SizedBox(
       width: 40,
-      child: Column(children: [
-        for (var i = 0; i < tabs.length; i++) ...[
-          if (i > 0) SizedBox(height: tabs[i].group != tabs[i - 1].group ? 10 : 4),
-          Expanded(child: _tab(p, i)),
-        ],
-      ]),
+      child: LayoutBuilder(builder: (context, c) {
+        // 棚が多くて 1 つが低くなりすぎるとき（印も字も読めない）は、高さを保ってスクロールにする
+        const minH = 72.0;
+        final gaps = [for (var i = 0; i < tabs.length; i++) gap(i)].fold<double>(0, (a, b) => a + b);
+        if ((c.maxHeight - gaps) / tabs.length >= minH) {
+          return Column(children: [
+            for (var i = 0; i < tabs.length; i++) ...[
+              if (i > 0) SizedBox(height: gap(i)),
+              Expanded(child: _tab(p, i)),
+            ],
+          ]);
+        }
+        return ListView(padding: EdgeInsets.zero, children: [
+          for (var i = 0; i < tabs.length; i++) ...[
+            if (i > 0) SizedBox(height: gap(i)),
+            SizedBox(height: minH, child: _tab(p, i)),
+          ],
+        ]);
+      }),
     );
+  }
+
+  /// タブの字：英字は横に寝かせる。日本語（棚の名前）は縦に積む（4 字まで）
+  Widget _label(Palette p, ThetaTab t, Color fg) {
+    final ascii = RegExp(r'^[\x20-\x7E]+$').hasMatch(t.label);
+    if (ascii) {
+      return RotatedBox(
+        quarterTurns: 3,
+        child: Text(t.label, style: TextStyle(fontSize: 12, letterSpacing: 1.5, fontFamily: p.mono, color: fg)),
+      );
+    }
+    final chars = t.label.characters.take(4).toList();
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      for (final ch in chars) Text(ch, style: TextStyle(fontSize: 13, height: 1.1, color: fg)),
+    ]);
   }
 
   Widget _tab(Palette p, int i) {
@@ -564,14 +602,7 @@ class ThetaTabs extends StatelessWidget {
               builder: (context, c) => Center(
                 child: c.maxHeight < 64
                     ? Icon(t.icon, size: 19, color: fg)
-                    : FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: RotatedBox(
-                          quarterTurns: 3,
-                          child: Text(t.label,
-                              style: TextStyle(fontSize: 12, letterSpacing: 1.5, fontFamily: p.mono, color: fg)),
-                        ),
-                      ),
+                    : FittedBox(fit: BoxFit.scaleDown, child: _label(p, t, fg)),
               ),
             ),
           ]),
