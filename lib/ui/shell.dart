@@ -322,6 +322,9 @@ class _ShellState extends State<Shell> implements Nav {
 
   bool get _phone => Platform.isAndroid || Platform.isIOS;
 
+  /// 前に描いたときの向き（縦 → 横に変わった瞬間を見分ける）
+  Orientation? _orientation;
+
   @override
   void dispose() {
     _seekTimer?.cancel();
@@ -355,10 +358,18 @@ class _ShellState extends State<Shell> implements Nav {
       guide: _guide,
     );
     final mq = MediaQuery.of(context);
-    // スマホを横にしたら全画面（縦に戻すと全画面の方が閉じる）
-    if (_phone && mq.orientation == Orientation.landscape && services.playback.hasMedia && !_fullscreen) {
+    // 再生中にスマホを縦から横に変えた瞬間だけ全画面にする（縦に戻すと全画面の方が閉じる）。
+    // 最初から横向きで再生を始めたとき・横向きのまま全画面を閉じたときは、勝手に全画面にしない
+    // （全画面はダブルタップ・全画面ボタン・中央の長押しで）
+    final o = mq.orientation;
+    if (_phone &&
+        _orientation == Orientation.portrait &&
+        o == Orientation.landscape &&
+        services.playback.hasMedia &&
+        !_fullscreen) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openFullscreen());
     }
+    _orientation = o;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: p.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: PopScope(
@@ -849,6 +860,15 @@ class NowPanel extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                  // 全画面ボタン（横向きのまま再生を始めたときなど）
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onDoubleTap,
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 8),
+                      child: Icon(Icons.fullscreen, size: 22, color: Colors.white),
                     ),
                   ),
                 ],
