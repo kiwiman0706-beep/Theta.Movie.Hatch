@@ -85,6 +85,28 @@ void main() {
     expect(r.firstWhere((x) => x.name == '〇〇').kind, TitleKind.series);
   });
 
+  test('シーズンのタイトルと、別の並び順（.m3u8）', () async {
+    final t = FakeTree({
+      '/v/アニメ/ハルヒ (2006)/tvshow.nfo':
+          '<tvshow><title>ハルヒ</title><namedseason number="1">一期</namedseason><namedseason number="2">二期</namedseason></tvshow>',
+      '/v/アニメ/ハルヒ (2006)/Season 01/ハルヒ S01E01.mkv': '',
+      '/v/アニメ/ハルヒ (2006)/Season 01/ハルヒ S01E02.mkv': '',
+      '/v/アニメ/ハルヒ (2006)/Season 02 二〇〇九/ハルヒ S02E01.mkv': '',
+      '/v/アニメ/ハルヒ (2006)/Season 02 二〇〇九/season.nfo': '<season><title>2009 年版</title></season>',
+      '/v/アニメ/ハルヒ (2006)/放送順.m3u8':
+          '#EXTM3U\n#EXTINF:-1,第二話\nSeason 01/ハルヒ S01E02.mkv\n./Season 01/ハルヒ S01E01.mkv\nSeason 02 二〇〇九/ハルヒ S02E01.mkv\nない.mkv\n',
+    });
+    final r = await Scanner(t.list, t.read).scan(['/v']);
+    final h = r.single;
+    expect(h.seasons, [1, 2]);
+    expect(h.seasonTitles, {1: '一期', 2: '2009 年版'}); // season.nfo がフォルダ名より優先
+    expect(h.orders.keys, ['放送順']);
+    expect([for (final e in h.episodesInOrder('放送順')) e.code], ['S01E02', 'S01E01', 'S02E01']);
+    expect([for (final e in h.episodesInOrder(null)) e.code], ['S01E01', 'S01E02', 'S02E01']);
+    final back = Title.fromJson(jsonDecode(jsonEncode(h.toJson())) as Map<String, dynamic>);
+    expect(back.toJson(), h.toJson());
+  });
+
   test('読めないフォルダは飛ばして続ける', () async {
     final t = FakeTree({
       '/video/映画/A (2000)/A (2000).mkv': '',

@@ -193,12 +193,22 @@ class Scanner {
       for (final v in videos) {
         addEp(v, 1);
       }
+      // シーズンのタイトル：season.nfo ＞ tvshow.nfo の namedseason ＞ フォルダ名の後ろ（「Season 02 遊郭編」）
+      final seasonTitles = <int, String>{};
       for (final s in seasonDirs) {
         final n = parseSeasonFolder(s.name)!;
-        final inner = (await _ls(s.path)).where((e) => !e.isDir && isVideo(e.name)).toList()
+        final listing = await _ls(s.path);
+        final inner = listing.where((e) => !e.isDir && isVideo(e.name)).toList()
           ..sort((a, b) => naturalCompare(a.name, b.name));
         for (final v in inner) {
           addEp(v, n);
+        }
+        final folderTitle = seasonFolderTitle(s.name);
+        if (folderTitle.isNotEmpty) seasonTitles[n] = folderTitle;
+        final sn = listing.where((e) => !e.isDir && e.name.toLowerCase() == 'season.nfo').firstOrNull;
+        if (sn != null) {
+          final t = parseSeasonNfoTitle(await _text(sn.path));
+          if (t.isNotEmpty) seasonTitles[n] = t;
         }
       }
       // 番号の無い話は、並び順で番号を振らずに名前順のまま
@@ -216,6 +226,20 @@ class Scanner {
         return naturalCompare(a.file.name, b.file.name);
       });
       final info = await _nfo(pick(['tvshow.nfo']));
+      for (final e in info.namedSeasons.entries) {
+        seasonTitles.putIfAbsent(e.key, () => e.value);
+      }
+      // 別の並び順：シリーズのフォルダの .m3u8（放送順.m3u8・時系列順.m3u8 など）。ファイルは複製しない
+      final orders = <String, List<String>>{};
+      final known = {for (final e in eps) e.file.path};
+      for (final pl in ch.where((e) => !e.isDir && (extOf(e.name) == 'm3u8' || extOf(e.name) == 'm3u'))) {
+        final paths = <String>[];
+        for (final (ref, _) in parsePlaylist(await _text(pl.path))) {
+          final abs = _resolve(dir.path, ref);
+          if (known.contains(abs)) paths.add(abs);
+        }
+        if (paths.isNotEmpty) orders[stemOf(pl.name)] = paths;
+      }
       _out.add(Title(
         id: dir.path,
         shelf: shelf,
@@ -228,6 +252,8 @@ class Scanner {
         episodes: eps,
         extras: extras,
         added: added,
+        seasonTitles: seasonTitles,
+        orders: orders,
       ));
       return;
     }
@@ -269,6 +295,32 @@ class Scanner {
       files: [VideoFile(f.path, f.size)],
       added: f.mtime,
     );
+  }
+
+  /// 小さな文字のファイル（season.nfo・.m3u8）。読めなければ ''
+  Future<String> _text(String path) async {
+    try {
+      final b = await _limit(() => read(path));
+      return b == null ? '' : utf8.decode(b, allowMalformed: true).replaceFirst('\uFEFF', '');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// プレイリストの中のパス（相対・絶対、./ ../ 付き）を NAS の絶対パスにする
+  static String _resolve(String base, String ref) {
+    var r = ref.trim();
+    if (r.startsWith('file://')) r = Uri.decodeFull(r.substring(7));
+    final parts = r.startsWith('/') ? <String>[] : base.split('/').where((s) => s.isNotEmpty).toList();
+    for (final seg in r.split('/')) {
+      if (seg.isEmpty || seg == '.') continue;
+      if (seg == '..') {
+        if (parts.isNotEmpty) parts.removeLast();
+      } else {
+        parts.add(seg);
+      }
+    }
+    return '/${parts.join('/')}';
   }
 
   Future<Info> _nfo(String? path) async {

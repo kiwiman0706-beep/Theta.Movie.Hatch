@@ -49,6 +49,41 @@ Info parseNfo(String text) {
     cast: cast,
     directors: many('director'),
     collection: set,
+    namedSeasons: {
+      for (final e in root.findElements('namedseason'))
+        if (int.tryParse(e.getAttribute('number') ?? '') != null && e.innerText.trim().isNotEmpty)
+          int.parse(e.getAttribute('number')!): e.innerText.trim(),
+    },
     tmdbId: tmdb,
   );
+}
+
+/// season.nfo（Season フォルダの中）のタイトル。読めなければ ''
+String parseSeasonNfoTitle(String text) {
+  try {
+    final i = text.indexOf('<');
+    if (i < 0) return '';
+    return XmlDocument.parse(text.substring(i)).rootElement.getElement('title')?.innerText.trim() ?? '';
+  } catch (_) {
+    return '';
+  }
+}
+
+/// プレイリスト（.m3u / .m3u8）：並び順の相対パス（または絶対パス）と、#EXTINF の題名
+List<(String, String)> parsePlaylist(String text) {
+  final out = <(String, String)>[];
+  var title = '';
+  for (var line in text.split(RegExp(r'\r?\n'))) {
+    line = line.trim();
+    if (line.isEmpty) continue;
+    if (line.startsWith('#EXTINF')) {
+      final c = line.indexOf(',');
+      title = c < 0 ? '' : line.substring(c + 1).trim();
+      continue;
+    }
+    if (line.startsWith('#')) continue;
+    out.add((line.replaceAll('\\', '/'), title));
+    title = '';
+  }
+  return out;
 }

@@ -173,14 +173,34 @@ MenuScreen titleMenu(Title t) => MenuScreen(
                 filePath: next.file.path,
                 onSelect: () => services.playback.play(t, next.file)));
           }
+          // 並び順（シリーズのフォルダの .m3u8：放送順・時系列順など）。押すたびに切り替え
+          final order = services.settings.episodeOrder[t.id];
+          final current = order != null && t.orders.containsKey(order) ? order : null;
+          if (t.orders.isNotEmpty) {
+            items.add(MenuItem('並び順', detail: current ?? 'フォルダの順', poster: t.poster, onSelect: () {
+              final names = [null, ...t.orders.keys];
+              final next = names[(names.indexOf(current) + 1) % names.length];
+              final st = services.settings;
+              if (next == null) {
+                st.episodeOrder.remove(t.id);
+              } else {
+                st.episodeOrder[t.id] = next;
+              }
+              st.save();
+              nav.toast('並び順：${next ?? 'フォルダの順'}');
+            }));
+          }
           final seasons = t.seasons;
-          if (seasons.length == 1) {
+          if (current != null) {
+            // 別の並び順のときは、シーズンに分けずにその順で全部
+            items.addAll(_episodeList(t, t.episodesInOrder(current)));
+          } else if (seasons.length == 1) {
             items.addAll(_episodeItems(t, seasons.single));
           } else {
             for (final s in seasons) {
               final eps = t.episodesOf(s);
               final done = eps.where((e) => pr.isDone(e.file.path)).length;
-              items.add(MenuItem(_seasonName(s),
+              items.add(MenuItem(_seasonName(s, t),
                   detail: '$done/${eps.length}', chevron: true, poster: t.poster, onSelect: () => nav.push(seasonMenu(t, s))));
             }
           }
@@ -245,16 +265,23 @@ MenuScreen titleMenu(Title t) => MenuScreen(
         }
         return items;
       },
-      deps: [services.progress, services.playback],
+      deps: [services.progress, services.playback, services.settings],
     );
 
-String _seasonName(int s) => s == 0 ? '特別編' : (s > 1900 ? '$s 年' : 'シーズン $s');
+/// 「シーズン 2 遊郭編」（タイトルは season.nfo・tvshow.nfo の namedseason・フォルダ名から）
+String _seasonName(int s, [Title? t]) {
+  final base = s == 0 ? '特別編' : (s > 1900 ? '$s 年' : 'シーズン $s');
+  final title = t?.seasonTitles[s] ?? '';
+  return title.isEmpty ? base : '$base $title';
+}
 
 MenuScreen seasonMenu(Title t, int season) =>
-    MenuScreen('${t.displayName} ${_seasonName(season)}', () => _episodeItems(t, season), deps: [services.progress]);
+    MenuScreen('${t.displayName} ${_seasonName(season, t)}', () => _episodeItems(t, season), deps: [services.progress]);
 
-List<MenuItem> _episodeItems(Title t, int season) => [
-      for (final (i, e) in t.episodesOf(season).indexed)
+List<MenuItem> _episodeItems(Title t, int season) => _episodeList(t, t.episodesOf(season));
+
+List<MenuItem> _episodeList(Title t, List<Episode> eps) => [
+      for (final (i, e) in eps.indexed)
         MenuItem(
           e.title.isNotEmpty ? '${e.code.isEmpty ? '${i + 1}' : e.code} ${e.title}' : (e.code.isEmpty ? e.file.name : e.code),
           detail: e.tags.isEmpty ? null : e.tags.first,

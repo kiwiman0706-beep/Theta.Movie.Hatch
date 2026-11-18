@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -64,6 +66,9 @@ class AppSettings extends ChangeNotifier {
   /// 音の出し方（Android の mpv の ao）：audiotrack（既定）・opensles
   String audioOutput = 'audiotrack';
 
+  /// 作品ごとに選んだ並び順（作品の id → .m3u8 の名前）。無ければフォルダの順
+  Map<String, String> episodeOrder = {};
+
   bool get configured => (source == SourceKind.dsm ? dsUrl : davUrl).trim().isNotEmpty && user.isNotEmpty;
 
   Future<void> load() async {
@@ -83,6 +88,9 @@ class AppSettings extends ChangeNotifier {
     thetaLayout = _p.getString('thetaLayout') ?? 'auto';
     tabLabels = _p.getBool('tabLabels') ?? false;
     audioOutput = _p.getString('audioOutput') ?? 'audiotrack';
+    try {
+      episodeOrder = Map<String, String>.from(jsonDecode(_p.getString('episodeOrder') ?? '{}') as Map);
+    } catch (_) {}
     final s = secure;
     if (s != null) {
       try {
@@ -111,6 +119,7 @@ class AppSettings extends ChangeNotifier {
     await _p.setString('thetaLayout', thetaLayout);
     await _p.setBool('tabLabels', tabLabels);
     await _p.setString('audioOutput', audioOutput);
+    await _p.setString('episodeOrder', jsonEncode(episodeOrder));
     final values = {'password': password, 'did': did};
     final s = secure;
     for (final k in _secretKeys) {

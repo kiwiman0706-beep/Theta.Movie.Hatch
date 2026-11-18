@@ -41,6 +41,15 @@ void main() {
       expect(parseSeasonFolder('シーズン3'), 3);
       expect(parseSeasonFolder('extras'), isNull);
     });
+    test('タイトル付きのシーズンのフォルダ（整理前）', () {
+      expect(parseSeasonFolder('Season 02 遊郭編'), 2);
+      expect(seasonFolderTitle('Season 02 遊郭編'), '遊郭編');
+      expect(seasonFolderTitle('Season 2 - 遊郭編'), '遊郭編');
+      expect(parseSeasonFolder('第2期 遊郭編'), 2);
+      expect(seasonFolderTitle('第2期 遊郭編'), '遊郭編');
+      expect(seasonFolderTitle('Season 01'), '');
+      expect(parseSeasonFolder('S2ample'), isNull);
+    });
   });
 
   group('話のファイル', () {

@@ -63,6 +63,7 @@ class Info {
   final int? year;
   final List<String> genres, cast, directors;
   final String collection; // NFO の <set>（シリーズの劇場版などのまとまり）
+  final Map<int, String> namedSeasons; // tvshow.nfo の <namedseason number="2">遊郭編</namedseason>
   final String tmdbId;
   const Info({
     this.title = '',
@@ -74,6 +75,7 @@ class Info {
     this.cast = const [],
     this.directors = const [],
     this.collection = '',
+    this.namedSeasons = const {},
     this.tmdbId = '',
   });
   static const empty = Info();
@@ -88,6 +90,7 @@ class Info {
         if (cast.isNotEmpty) 'cast': cast,
         if (directors.isNotEmpty) 'dir': directors,
         if (collection.isNotEmpty) 'set': collection,
+        if (namedSeasons.isNotEmpty) 'seasons': {for (final e in namedSeasons.entries) '${e.key}': e.value},
         if (tmdbId.isNotEmpty) 'tmdb': tmdbId,
       };
 
@@ -104,10 +107,18 @@ class Info {
       cast: l('cast'),
       directors: l('dir'),
       collection: j['set'] as String? ?? '',
+      namedSeasons: {
+        for (final e in ((j['seasons'] as Map?) ?? const {}).entries)
+          if (int.tryParse('${e.key}') != null) int.parse('${e.key}'): '${e.value}',
+      },
       tmdbId: j['tmdb'] as String? ?? '',
     );
   }
 }
+
+/// 作品の話を、利用者が選んだ並び順で返す（AppSettings の episodeOrder。Services が入れる）。
+/// 続きから・次の話はこの順に進む
+List<Episode> Function(Title) episodesOf = (t) => t.episodes;
 
 class Title {
   final String id; // 作品のフォルダ（ファイル 1 つだけの作品はそのファイル）のパス
@@ -123,6 +134,12 @@ class Title {
   final List<VideoFile> extras;
   final int added; // 見つけた時刻（ミリ秒。NAS の更新時刻）
 
+  /// シーズンのタイトル（season.nfo・tvshow.nfo の namedseason・フォルダ名の後ろ）
+  final Map<int, String> seasonTitles;
+
+  /// 別の並び順（シリーズのフォルダの .m3u8。名前 → ファイルのパスの並び）。例：放送順・時系列順
+  final Map<String, List<String>> orders;
+
   const Title({
     required this.id,
     required this.shelf,
@@ -136,6 +153,8 @@ class Title {
     this.episodes = const [],
     this.extras = const [],
     this.added = 0,
+    this.seasonTitles = const {},
+    this.orders = const {},
   });
 
   String get displayName => info.title.isNotEmpty ? info.title : name;
@@ -149,6 +168,14 @@ class Title {
   }
 
   List<Episode> episodesOf(int season) => episodes.where((e) => e.season == season).toList();
+
+  /// 並び順 [order]（orders の名前。null・知らない名前ならフォルダの順）の全話
+  List<Episode> episodesInOrder(String? order) {
+    final paths = order == null ? null : orders[order];
+    if (paths == null) return episodes;
+    final byPath = {for (final e in episodes) e.file.path: e};
+    return [for (final p in paths) ?byPath[p]];
+  }
 
   /// 再生できるファイルを全部（続きからの判定・オフライン用）
   List<VideoFile> get allFiles => [...files, for (final e in episodes) e.file];
@@ -166,6 +193,8 @@ class Title {
         if (episodes.isNotEmpty) 'eps': [for (final e in episodes) e.toJson()],
         if (extras.isNotEmpty) 'extras': [for (final f in extras) f.toJson()],
         'added': added,
+        if (seasonTitles.isNotEmpty) 'stitles': {for (final e in seasonTitles.entries) '${e.key}': e.value},
+        if (orders.isNotEmpty) 'orders': orders,
       };
 
   factory Title.fromJson(Map<String, dynamic> j) => Title(
@@ -181,5 +210,13 @@ class Title {
         episodes: [for (final e in (j['eps'] as List? ?? const [])) Episode.fromJson(e as Map<String, dynamic>)],
         extras: [for (final f in (j['extras'] as List? ?? const [])) VideoFile.fromJson(f as Map<String, dynamic>)],
         added: j['added'] as int? ?? 0,
+        seasonTitles: {
+          for (final e in ((j['stitles'] as Map?) ?? const {}).entries)
+            if (int.tryParse('${e.key}') != null) int.parse('${e.key}'): '${e.value}',
+        },
+        orders: {
+          for (final e in ((j['orders'] as Map?) ?? const {}).entries)
+            '${e.key}': [for (final p in (e.value as List)) '$p'],
+        },
       );
 }

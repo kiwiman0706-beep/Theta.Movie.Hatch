@@ -87,13 +87,27 @@ MovieFileName parseMovieFile(String fileName) {
   return MovieFileName(tail, null);
 }
 
-/// 「Season 01」「Season 2019」「Specials」「シーズン1」「第2期」→ シーズン番号（特別編は 0）
-int? parseSeasonFolder(String name) {
-  final s = name.trim().toLowerCase();
-  if (s == 'specials' || s == 'special' || s == 'sp' || s == '特別編' || s == 'ova') return 0;
-  final m = RegExp(r'^(?:season|series|s|シーズン)\s*(\d{1,4})$').firstMatch(s) ??
-      RegExp(r'^第\s*(\d{1,2})\s*(?:期|シーズン|シリーズ)$').firstMatch(s);
-  return m == null ? null : int.parse(m.group(1)!);
+/// 「Season 01」「Season 2019」「Specials」「シーズン1」「第2期」→ シーズン番号（特別編は 0）。
+/// 整理前の「Season 02 遊郭編」「Season 2 - 遊郭編」「第2期 遊郭編」も読む（後ろはシーズンのタイトル）
+int? parseSeasonFolder(String name) => _season(name)?.$1;
+
+/// フォルダ名に付いたシーズンのタイトル（無ければ ''）
+String seasonFolderTitle(String name) => _season(name)?.$2 ?? '';
+
+(int, String)? _season(String name) {
+  final raw = name.trim();
+  final s = raw.toLowerCase();
+  if (s == 'specials' || s == 'special' || s == 'sp' || s == '特別編' || s == 'ova') return (0, '');
+  final m = RegExp(r'^(?:season|series|s|シーズン)\s*(\d{1,4})(?:\s*[-–—:：_・]?\s+|\s*[-–—:：_・]\s*)?(.*)$', caseSensitive: false)
+          .firstMatch(raw) ??
+      RegExp(r'^第\s*(\d{1,2})\s*(?:期|シーズン|シリーズ)\s*[-–—:：_・]?\s*(.*)$').firstMatch(raw);
+  if (m == null) return null;
+  final title = (m.group(2) ?? '').trim();
+  // 「S2」の後ろにすぐ英字が続くもの（「Sample」など）はシーズンではない
+  if (title.isNotEmpty && RegExp(r'^(?:season|series|s|シーズン)\s*\d+[a-z]', caseSensitive: false).hasMatch(raw)) {
+    return null;
+  }
+  return (int.parse(m.group(1)!), title);
 }
 
 /// 話のファイル名から読み取ったもの

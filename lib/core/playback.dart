@@ -99,15 +99,17 @@ class Playback extends ChangeNotifier {
   Episode? get nextEpisode {
     final t = title, f = file;
     if (t == null || f == null) return null;
-    final i = t.episodes.indexWhere((e) => e.file.path == f.path);
-    return i < 0 || i + 1 >= t.episodes.length ? null : t.episodes[i + 1];
+    final eps = episodesOf(t); // 選んだ並び順（放送順・時系列順など）で次へ
+    final i = eps.indexWhere((e) => e.file.path == f.path);
+    return i < 0 || i + 1 >= eps.length ? null : eps[i + 1];
   }
 
   Episode? get previousEpisode {
     final t = title, f = file;
     if (t == null || f == null) return null;
-    final i = t.episodes.indexWhere((e) => e.file.path == f.path);
-    return i <= 0 ? null : t.episodes[i - 1];
+    final eps = episodesOf(t);
+    final i = eps.indexWhere((e) => e.file.path == f.path);
+    return i <= 0 ? null : eps[i - 1];
   }
 
   /// 「作品名  S01E03 サブタイトル」

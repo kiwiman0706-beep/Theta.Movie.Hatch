@@ -80,7 +80,8 @@ class Progress extends ChangeNotifier {
         // 最後に触った話
         Episode? last;
         Mark? lm;
-        for (final e in t.episodes) {
+        final eps = episodesOf(t);
+        for (final e in eps) {
           final m = marks[e.file.path];
           if (m != null && (lm == null || m.at > lm.at)) {
             last = e;
@@ -91,8 +92,8 @@ class Progress extends ChangeNotifier {
         if (!lm!.done && lm.pos > 10) {
           out.add((t, last.file, lm, lm.at));
         } else if (lm.done) {
-          final i = t.episodes.indexOf(last);
-          final next = t.episodes.skip(i + 1).where((e) => !isDone(e.file.path) && e.season != 0).firstOrNull;
+          final i = eps.indexOf(last);
+          final next = eps.skip(i + 1).where((e) => !isDone(e.file.path) && e.season != 0).firstOrNull;
           if (next != null) out.add((t, next.file, marks[next.file.path], lm.at));
         }
       } else {
@@ -109,7 +110,8 @@ class Progress extends ChangeNotifier {
   /// シリーズで次に見る話（見ていない最初の話。全部見たら最初）
   Episode? nextEpisode(Title t) {
     final cw = continueWatching([t]);
-    if (cw.isNotEmpty) return t.episodes.where((e) => e.file.path == cw.first.$2.path).firstOrNull;
-    return t.episodes.where((e) => !isDone(e.file.path) && e.season != 0).firstOrNull ?? t.episodes.firstOrNull;
+    final eps = episodesOf(t);
+    if (cw.isNotEmpty) return eps.where((e) => e.file.path == cw.first.$2.path).firstOrNull;
+    return eps.where((e) => !isDone(e.file.path) && e.season != 0).firstOrNull ?? eps.firstOrNull;
   }
 }
