@@ -23,6 +23,14 @@ import io.flutter.plugin.common.MethodChannel
  * - 電話などでフォーカスを失ったら一時停止、戻ったら再開。Bluetooth が切れた・イヤホンが抜けたら一時停止
  */
 class MediaBridge(private val activity: Activity, private val channel: MethodChannel) {
+    init {
+        instance = this
+    }
+
+    private var title = ""
+    private var subtitle = ""
+    private var playing = false
+
     private val am = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var session: MediaSession? = null
     private var focus: AudioFocusRequest? = null
@@ -56,6 +64,20 @@ class MediaBridge(private val activity: Activity, private val channel: MethodCha
             if (i.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) send("pause")
         }
     }
+
+    /** 通知（再生中の操作ボタン）の許可を、初めて再生したときに 1 回だけ聞く（Android 13 以降） */
+    private fun askNotificationOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val p = android.Manifest.permission.POST_NOTIFICATIONS
+        if (activity.checkSelfPermission(p) == android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val prefs = activity.getSharedPreferences("media", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("askedNotification", false)) return
+        prefs.edit().putBoolean("askedNotification", true).apply()
+        activity.requestPermissions(arrayOf(p), 4201)
+    }
+
+    /** 通知のボタンから（PlaybackService） */
+    fun button(b: String) = send(b)
 
     private fun send(button: String, pos: Long? = null) {
         activity.runOnUiThread {
@@ -107,6 +129,9 @@ class MediaBridge(private val activity: Activity, private val channel: MethodCha
         when (call.method) {
             // 作品が変わった・再生を始めた：題名と長さ
             "meta" -> {
+                title = call.argument<String>("title") ?: ""
+                subtitle = call.argument<String>("subtitle") ?: ""
+                if (playing) PlaybackService.update(activity, title, subtitle, true, session?.sessionToken)
                 val s = ensureSession()
                 s.setMetadata(
                     MediaMetadata.Builder()
@@ -123,6 +148,13 @@ class MediaBridge(private val activity: Activity, private val channel: MethodCha
                 val playing = call.argument<Boolean>("playing") ?: false
                 val pos = (call.argument<Number>("pos") ?: 0).toLong()
                 val s = ensureSession()
+                this.playing = playing
+                // バックグラウンド再生：再生を始めたら前面サービスと通知。一時停止は通知のボタンを切り替えるだけ
+                if (playing) askNotificationOnce()
+                if (playing || PlaybackServiceRunning.running) {
+                    PlaybackService.update(activity, title, subtitle, playing, s.sessionToken)
+                    PlaybackServiceRunning.running = true
+                }
                 if (playing) {
                     val granted = requestFocus()
                     if (!s.isActive) s.isActive = true
@@ -157,11 +189,42 @@ class MediaBridge(private val activity: Activity, private val channel: MethodCha
                 release()
                 result.success(null)
             }
+            // 全画面のジェスチャー：画面の明るさ（このアプリの画面だけ。0〜1、-1 で端末の設定に戻す）
+            "getBrightness" -> {
+                val w = activity.window.attributes.screenBrightness
+                val v = if (w >= 0) w else runCatching {
+                    android.provider.Settings.System.getInt(activity.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f
+                }.getOrDefault(0.5f)
+                result.success(v.toDouble())
+            }
+            "setBrightness" -> {
+                val v = (call.argument<Number>("value") ?: -1).toFloat()
+                activity.runOnUiThread {
+                    val a = activity.window.attributes
+                    a.screenBrightness = if (v < 0) -1f else v.coerceIn(0.01f, 1f)
+                    activity.window.attributes = a
+                }
+                result.success(null)
+            }
+            // 全画面のジェスチャー：端末のメディア音量（0〜1）
+            "getVolume" -> {
+                val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                result.success(if (max == 0) 0.5 else am.getStreamVolume(AudioManager.STREAM_MUSIC).toDouble() / max)
+            }
+            "setVolume" -> {
+                val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                val v = (call.argument<Number>("value") ?: 0.5).toDouble()
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(v * max).toInt().coerceIn(0, max), 0)
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
     }
 
     fun release() {
+        PlaybackService.stop(activity)
+        PlaybackServiceRunning.running = false
+        playing = false
         abandonFocus()
         resumeOnGain = false
         if (noisyRegistered) {
@@ -174,4 +237,13 @@ class MediaBridge(private val activity: Activity, private val channel: MethodCha
         }
         session = null
     }
+
+    companion object {
+        var instance: MediaBridge? = null
+    }
+}
+
+/** 前面サービスを動かしているか（一時停止で通知を更新するため） */
+object PlaybackServiceRunning {
+    var running = false
 }

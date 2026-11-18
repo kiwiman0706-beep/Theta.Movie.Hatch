@@ -9,6 +9,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../app.dart';
 import '../core/clicker.dart';
+import '../core/media_session.dart';
 import 'click_wheel.dart';
 import 'hud/hud_theme.dart';
 import 'hud/hud_widgets.dart';
@@ -992,9 +993,22 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
   bool get _mobile => Platform.isAndroid || Platform.isIOS;
   bool _wasLandscape = false;
 
+  /// ジェスチャーで変える明るさ・音量の、始めの値（端末から読む）
+  double? _brightness;
+  double? _volume;
+
   @override
   void initState() {
     super.initState();
+    if (_mobile) {
+      Future.wait([MediaSessionBridge.brightness(), MediaSessionBridge.volume()]).then((v) {
+        if (!mounted) return;
+        setState(() {
+          _brightness = v[0];
+          _volume = v[1];
+        });
+      });
+    }
     if (_mobile) SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     services.playback.addListener(_onChange);
   }
@@ -1007,7 +1021,10 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
   @override
   void dispose() {
     services.playback.removeListener(_onChange);
-    if (_mobile) SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (_mobile) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      MediaSessionBridge.resetBrightness();
+    }
     super.dispose();
   }
 
@@ -1112,6 +1129,19 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
       bottomButtonBar: [const MaterialPositionIndicator(), const Spacer(), exit()],
       seekBarThumbColor: accent,
       seekBarPositionColor: accent,
+      // VLC と同じジェスチャー：左右になぞって早送り・巻き戻し、左半分を上下で明るさ、右半分を上下で音量、
+      // 左右の端をダブルタップで 10 秒、長押しで倍速
+      seekGesture: true,
+      seekOnDoubleTap: true,
+      speedUpOnLongPress: true,
+      brightnessGesture: _brightness != null,
+      volumeGesture: _volume != null,
+      gesturesEnabledWhileControlsVisible: true,
+      initialBrightness: _brightness,
+      onBrightnessChanged: MediaSessionBridge.setBrightness,
+      onBrightnessReset: MediaSessionBridge.resetBrightness,
+      initialVolume: _volume,
+      onVolumeChanged: MediaSessionBridge.setVolume,
     );
     final desktopTheme = kDefaultMaterialDesktopVideoControlsThemeData.copyWith(
       topButtonBar: top,
@@ -1123,6 +1153,10 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
         exit(),
       ],
     );
+    // 明るさ・音量の始めの値を端末から読むまで待つ（操作部品は作られたときの値を使うため。数ミリ秒）
+    if (_mobile && (_brightness == null || _volume == null)) {
+      return const Scaffold(backgroundColor: Colors.black);
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       body: MaterialVideoControlsTheme(

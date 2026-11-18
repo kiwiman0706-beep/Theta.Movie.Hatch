@@ -26,6 +26,23 @@ class MediaSessionBridge {
 
   static Future<void> stop() => _call('stop', const {});
 
+  /// 全画面のジェスチャー：画面の明るさ（このアプリの画面だけ。0〜1）と、端末のメディア音量（0〜1）
+  static Future<double> brightness() => _get('getBrightness');
+  static Future<void> setBrightness(double v) => _call('setBrightness', {'value': v});
+
+  /// 端末の明るさの設定に戻す（全画面を閉じたとき）
+  static Future<void> resetBrightness() => _call('setBrightness', {'value': -1});
+  static Future<double> volume() => _get('getVolume');
+  static Future<void> setVolume(double v) => _call('setVolume', {'value': v});
+
+  static Future<double> _get(String m) async {
+    try {
+      return (await _ch.invokeMethod<num>(m))?.toDouble() ?? 0.5;
+    } catch (_) {
+      return 0.5;
+    }
+  }
+
   static Future<void> _call(String m, Map<String, Object?> args) async {
     try {
       await _ch.invokeMethod<void>(m, args);
