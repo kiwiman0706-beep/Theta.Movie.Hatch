@@ -24,9 +24,12 @@ class AppSettings extends ChangeNotifier {
   /// 動画の共有フォルダ（THETA_LIBRARY_SPEC.md §1。既定 /video）。複数はカンマか改行で区切る
   String videoRoot = '/video';
 
-  /// 読むフォルダの目印（接頭辞）。共有フォルダの直下で、名前がこれで始まるフォルダだけを読む。
-  /// Theta Book Hatch と同じ（既定 ⑧）。空なら共有フォルダの全部
-  String folderPrefix = '⑧';
+  /// 読むフォルダの目印（接頭辞）。共有フォルダの直下で、名前がこれで始まるフォルダだけを読む
+  /// （docs/naming-convention.md §1。既定 ▶。Theta Book Hatch の ⑧ と同じ仕組み）。空なら共有フォルダの全部
+  String folderPrefix = '▶';
+
+  /// 読み込み済みの整理の記録（_整理の記録/*.csv のファイル名）。同じ記録を二度当てない
+  List<String> appliedRenameLogs = [];
 
   List<String> get videoRoots => videoRootsOf(videoRoot);
 
@@ -78,7 +81,13 @@ class AppSettings extends ChangeNotifier {
     davUrl = _p.getString('davUrl') ?? '';
     user = _p.getString('user') ?? '';
     videoRoot = _p.getString('videoRoot') ?? '/video';
-    folderPrefix = _p.getString('folderPrefix') ?? '⑧';
+    folderPrefix = _p.getString('folderPrefix') ?? '▶';
+    // 0.3.2 までの既定 ⑧ は、動画は ▶ に決めた（2026-11-18）ので一度だけ置き換える
+    if (folderPrefix == '⑧' && !(_p.getBool('prefixMigrated') ?? false)) {
+      folderPrefix = '▶';
+      await _p.setBool('prefixMigrated', true);
+    }
+    appliedRenameLogs = _p.getStringList('appliedRenameLogs') ?? [];
     skin = _p.getString('skin') ?? 'system';
     followSeriesSkin = _p.getBool('followSeriesSkin') ?? true;
     doneMarginSec = _p.getInt('doneMarginSec') ?? 120;
@@ -110,6 +119,7 @@ class AppSettings extends ChangeNotifier {
     await _p.setString('user', user);
     await _p.setString('videoRoot', videoRoot);
     await _p.setString('folderPrefix', folderPrefix);
+    await _p.setStringList('appliedRenameLogs', appliedRenameLogs);
     await _p.setString('skin', skin);
     await _p.setBool('followSeriesSkin', followSeriesSkin);
     await _p.setInt('doneMarginSec', doneMarginSec);

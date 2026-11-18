@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'dsm.dart';
 import 'models.dart';
+import 'progress.dart';
 import 'scanner.dart';
 import 'settings.dart';
 import 'source.dart';
@@ -107,6 +108,7 @@ class Library extends ChangeNotifier {
         titles = found;
         scannedAt = DateTime.now().millisecondsSinceEpoch;
         await _saveCache();
+        await _applyRenameLogs(src);
         status = '${titles.length} 作品';
         if (found.isEmpty && settings.folderPrefix.trim().isNotEmpty) {
           error = '「${settings.folderPrefix.trim()}」で始まるフォルダが ${settings.videoRoots.join('・')} にありません'
@@ -126,6 +128,42 @@ class Library extends ChangeNotifier {
     } finally {
       scanning = false;
       notifyListeners();
+    }
+  }
+
+  /// 整理の記録（共有フォルダの _整理の記録/*.csv）を読んで、続きから・並び順の選択を新しい場所に付け替える。
+  /// 記録はファイル名の順（日時）に当て、当てた記録の名前は覚えて二度当てない（元に戻した記録も同じ形で残る）
+  Progress? progress;
+
+  Future<void> _applyRenameLogs(MediaSource src) async {
+    final pr = progress;
+    if (pr == null) return;
+    for (final root in settings.videoRoots) {
+      List<Entry> logs;
+      try {
+        logs = (await src.list('$root/_整理の記録')).where((e) => !e.isDir && e.name.toLowerCase().endsWith('.csv')).toList()
+          ..sort((a, b) => a.name.compareTo(b.name));
+      } catch (_) {
+        continue; // 記録が無い
+      }
+      for (final log in logs) {
+        final key = log.path;
+        if (settings.appliedRenameLogs.contains(key)) continue;
+        try {
+          final b = await src.read(log.path);
+          if (b == null) continue;
+          final moves = parseRenameLog(utf8.decode(b, allowMalformed: true));
+          final n = await pr.remap(moves);
+          settings.episodeOrder = {
+            for (final e in settings.episodeOrder.entries) remapPath(e.key, moves): e.value,
+          };
+          settings.appliedRenameLogs = [...settings.appliedRenameLogs, key];
+          await settings.save();
+          if (n > 0) status = '$status（整理の記録から $n 件の続きを引き継ぎ）';
+        } catch (e) {
+          debugPrint('rename log ${log.path}: $e');
+        }
+      }
     }
   }
 

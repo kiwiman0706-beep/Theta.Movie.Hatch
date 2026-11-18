@@ -26,6 +26,7 @@ class Services {
     await s.load();
     final lib = Library(s);
     final pr = Progress();
+    lib.progress = pr;
     await Future.wait([lib.loadCache(), pr.load()]);
     // 続きから・次の話を、作品ごとに選んだ並び順（.m3u8）で
     episodesOf = (t) => t.episodesInOrder(s.episodeOrder[t.id]);

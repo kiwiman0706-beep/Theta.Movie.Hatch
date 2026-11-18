@@ -72,6 +72,24 @@ class Progress extends ChangeNotifier {
 
   bool isDone(String path) => marks[path]?.done ?? false;
 
+  /// 整理で動かしたファイル・フォルダ（元の場所 → 新しい場所、順に）に合わせて、記録の場所を付け替える。
+  /// フォルダごと動かした記録なら、その中のファイルも付け替える。付け替えた数を返す
+  Future<int> remap(List<(String, String)> moves) async {
+    var n = 0;
+    final next = <String, Mark>{};
+    for (final e in marks.entries) {
+      final to = remapPath(e.key, moves);
+      if (to != e.key) n++;
+      next[to] = e.value;
+    }
+    if (n > 0) {
+      marks = next;
+      notifyListeners();
+      await _save();
+    }
+    return n;
+  }
+
   /// 続きから見る：途中の物と、シリーズの次の話。新しい順
   List<(Title, VideoFile, Mark?)> continueWatching(List<Title> titles) {
     final out = <(Title, VideoFile, Mark?, int)>[];
@@ -114,4 +132,58 @@ class Progress extends ChangeNotifier {
     if (cw.isNotEmpty) return eps.where((e) => e.file.path == cw.first.$2.path).firstOrNull;
     return eps.where((e) => !isDone(e.file.path) && e.season != 0).firstOrNull ?? eps.firstOrNull;
   }
+}
+
+/// 1 つのパスに整理の記録を順に当てる（ファイルそのもの、または入っているフォルダが動いていれば付け替え）
+String remapPath(String path, List<(String, String)> moves) {
+  var p = path;
+  for (final (from, to) in moves) {
+    if (p == from) {
+      p = to;
+    } else if (p.startsWith('$from/')) {
+      p = '$to${p.substring(from.length)}';
+    }
+  }
+  return p;
+}
+
+/// 整理の記録（CSV）から「元の場所, 新しい場所」を読む。1 列目と 2 列目。見出しの行・NAS のパスでない行は飛ばす
+List<(String, String)> parseRenameLog(String text) {
+  final out = <(String, String)>[];
+  for (final line in text.replaceFirst('\uFEFF', '').split(RegExp(r'\r?\n'))) {
+    final cols = _csv(line);
+    if (cols.length < 2) continue;
+    final from = cols[0].trim(), to = cols[1].trim();
+    if (!from.startsWith('/') || !to.startsWith('/') || from == to) continue;
+    out.add((from, to));
+  }
+  return out;
+}
+
+List<String> _csv(String line) {
+  final out = <String>[];
+  final b = StringBuffer();
+  var q = false;
+  for (var i = 0; i < line.length; i++) {
+    final c = line[i];
+    if (q) {
+      if (c == '"' && i + 1 < line.length && line[i + 1] == '"') {
+        b.write('"');
+        i++;
+      } else if (c == '"') {
+        q = false;
+      } else {
+        b.write(c);
+      }
+    } else if (c == '"') {
+      q = true;
+    } else if (c == ',') {
+      out.add(b.toString());
+      b.clear();
+    } else {
+      b.write(c);
+    }
+  }
+  out.add(b.toString());
+  return out;
 }

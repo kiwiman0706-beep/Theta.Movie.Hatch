@@ -198,11 +198,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 10),
             TextField(controller: _root, decoration: deco('動画の共有フォルダ（複数はカンマで）', '/video')),
             const SizedBox(height: 10),
-            TextField(controller: _prefix, decoration: deco('読むフォルダの目印（空なら全部）', '⑧')),
+            TextField(controller: _prefix, decoration: deco('読むフォルダの目印（空なら全部）', '▶')),
             const SizedBox(height: 4),
             Text(
-              '共有フォルダの直下で、名前が目印で始まるフォルダだけを読みます（Theta Book Hatch と同じ）。'
-              '例：⑧映画・⑧アニメ → 棚「映画」「アニメ」',
+              '共有フォルダの直下で、名前が目印で始まるフォルダだけを読みます（Theta Book Hatch の ⑧ と同じ仕組み）。'
+              '例：▶映画・▶アニメ → 棚「映画」「アニメ」',
               style: TextStyle(color: p.faint, fontSize: 11, height: 1.5),
             ),
             const SizedBox(height: 12),
