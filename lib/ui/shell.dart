@@ -4,7 +4,6 @@ import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart' hide Title;
-import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../app.dart';
@@ -270,13 +269,9 @@ class _ShellState extends State<Shell> implements Nav {
       case WheelButton.playPause:
         if (pb.hasMedia) pb.toggle();
       case WheelButton.next:
-        if (pb.nextEpisode != null) {
-          pb.next();
-        } else {
-          pb.seekBy(const Duration(seconds: 30));
-        }
+        pb.skipNext();
       case WheelButton.previous:
-        pb.previous();
+        pb.skipPrevious();
     }
   }
 
@@ -1028,49 +1023,124 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
     super.dispose();
   }
 
-  Future<void> _pickTrack({required bool audio}) async {
-    final player = services.playback.player;
-    final tracks = player.state.tracks;
-    final list = audio ? tracks.audio : tracks.subtitle;
-    final cur = audio ? player.state.track.audio.id : player.state.track.subtitle.id;
-    String name(String id, String? title, String? lang) {
-      if (id == 'auto') return '自動';
-      if (id == 'no') return audio ? '音声なし' : '字幕なし';
-      final parts = [title, lang].where((x) => x != null && x.isNotEmpty).join(' / ');
-      return parts.isEmpty ? '#$id' : '#$id $parts';
-    }
+  static String _trackName(String id, String? title, String? lang, {required bool audio}) {
+    if (id == 'auto') return '自動';
+    if (id == 'no') return audio ? '音声なし' : '字幕なし';
+    final parts = [title, lang].where((x) => x != null && x.isNotEmpty).join(' / ');
+    return parts.isEmpty ? '#$id' : '#$id $parts';
+  }
 
+  Future<void> _pickAudio() async {
+    final player = services.playback.player;
+    final tracks = player.state.tracks.audio;
+    final cur = player.state.track.audio.id;
     final picked = await showModalBottomSheet<int>(
       context: context,
       builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(title: Text(audio ? '音声（二か国語など）' : '字幕')),
-            for (final (i, t) in list.indexed)
+        child: ListView(shrinkWrap: true, children: [
+          const ListTile(title: Text('音声（二か国語など）')),
+          for (final (i, t) in tracks.indexed)
+            ListTile(
+              leading: Icon(t.id == cur ? Icons.radio_button_checked : Icons.radio_button_off),
+              title: Text(_trackName(t.id, t.title, t.language, audio: true)),
+              subtitle: t.codec == null ? null : Text('${t.codec}${t.channels == null ? '' : ' ${t.channels}'}'),
+              onTap: () => Navigator.of(ctx).pop(i),
+            ),
+        ]),
+      ),
+    );
+    if (picked != null) await player.setAudioTrack(tracks[picked]);
+  }
+
+  /// 字幕：1 つ目（画像の字幕も可）と、同時に出す 2 つ目（文字の字幕だけ。上の方に出る）
+  Future<void> _pickSubtitle() async {
+    final pb = services.playback;
+    final player = pb.player;
+    final tracks = player.state.tracks.subtitle;
+    final real = [for (final t in tracks) if (t.id != 'auto' && t.id != 'no') t];
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final cur = player.state.track.subtitle.id;
+          final second = pb.secondarySubtitle;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+              child: ListView(shrinkWrap: true, children: [
+                const ListTile(title: Text('字幕')),
+                for (final t in tracks)
+                  ListTile(
+                    dense: true,
+                    leading: Icon(t.id == cur ? Icons.radio_button_checked : Icons.radio_button_off),
+                    title: Text(_trackName(t.id, t.title, t.language, audio: false)),
+                    subtitle: t.codec == null ? null : Text('${t.codec}${t.image == true ? '（画像）' : ''}'),
+                    onTap: () async {
+                      await player.setSubtitleTrack(t);
+                      setSheet(() {});
+                    },
+                  ),
+                if (real.length >= 2) ...[
+                  const Divider(),
+                  const ListTile(
+                    title: Text('2 つ目の字幕（同時に表示）'),
+                    subtitle: Text('文字の字幕だけ。画像の字幕（DVD・BD）は 2 つ目にできません'),
+                  ),
+                  ListTile(
+                    dense: true,
+                    leading: Icon(second == 'no' ? Icons.radio_button_checked : Icons.radio_button_off),
+                    title: const Text('出さない'),
+                    onTap: () async {
+                      await pb.setSecondarySubtitle('no');
+                      setSheet(() {});
+                    },
+                  ),
+                  for (final t in real)
+                    if (t.image != true && t.id != cur)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(second == t.id ? Icons.radio_button_checked : Icons.radio_button_off),
+                        title: Text(_trackName(t.id, t.title, t.language, audio: false)),
+                        onTap: () async {
+                          await pb.setSecondarySubtitle(t.id);
+                          setSheet(() {});
+                        },
+                      ),
+                ],
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// チャプター（HandBrake で作った MP4 など）
+  Future<void> _pickChapter() async {
+    final pb = services.playback;
+    final now = pb.chapterAt(pb.player.state.position);
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.8),
+          child: ListView(shrinkWrap: true, children: [
+            ListTile(title: Text('チャプター（${pb.chapters.length}）')),
+            for (final (i, c) in pb.chapters.indexed)
               ListTile(
-                leading: Icon(
-                  (audio ? (t as AudioTrack).id : (t as SubtitleTrack).id) == cur
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_off,
-                ),
-                title: Text(
-                  audio
-                      ? name((t as AudioTrack).id, t.title, t.language)
-                      : name((t as SubtitleTrack).id, t.title, t.language),
-                ),
+                dense: true,
+                leading: Icon(i == now ? Icons.play_arrow : Icons.bookmark_border),
+                title: Text(c.$1),
+                trailing: Text(fmtDuration(c.$2.inSeconds)),
                 onTap: () => Navigator.of(ctx).pop(i),
               ),
-          ],
+          ]),
         ),
       ),
     );
-    if (picked == null) return;
-    if (audio) {
-      await player.setAudioTrack(tracks.audio[picked]);
-    } else {
-      await player.setSubtitleTrack(tracks.subtitle[picked]);
-    }
+    if (picked != null) await pb.seekChapter(picked);
   }
 
   @override
@@ -1103,18 +1173,24 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
       IconButton(
         tooltip: '音声',
         icon: const Icon(Icons.audiotrack, color: Colors.white),
-        onPressed: () => _pickTrack(audio: true),
+        onPressed: _pickAudio,
       ),
       IconButton(
         tooltip: '字幕',
         icon: const Icon(Icons.subtitles, color: Colors.white),
-        onPressed: () => _pickTrack(audio: false),
+        onPressed: _pickSubtitle,
       ),
-      if (pb.nextEpisode != null)
+      if (pb.chapters.isNotEmpty)
         IconButton(
-          tooltip: '次の話',
+          tooltip: 'チャプター',
+          icon: const Icon(Icons.list, color: Colors.white),
+          onPressed: _pickChapter,
+        ),
+      if (pb.nextEpisode != null || pb.chapters.isNotEmpty)
+        IconButton(
+          tooltip: pb.nextEpisode != null ? '次の話' : '次のチャプター',
           icon: const Icon(Icons.skip_next, color: Colors.white),
-          onPressed: pb.next,
+          onPressed: pb.skipNext,
         ),
     ];
     final accent = Theme.of(context).colorScheme.primary;

@@ -200,6 +200,19 @@ MenuScreen titleMenu(Title t) => MenuScreen(
             }
           }
         }
+        // 今この作品を再生していて、チャプターがあれば（HandBrake の MP4 など）
+        final pb = services.playback;
+        if (pb.title?.id == t.id && pb.chapters.isNotEmpty) {
+          items.add(MenuItem('チャプター', detail: '${pb.chapters.length}', chevron: true, poster: t.poster, onSelect: () {
+            nav.push(MenuScreen(
+              'チャプター',
+              () => [
+                for (final (i, c) in pb.chapters.indexed)
+                  MenuItem(c.$1, detail: fmtDuration(c.$2.inSeconds), onSelect: () => pb.seekChapter(i)),
+              ],
+            ));
+          }));
+        }
         if (t.info.plot.isNotEmpty || t.info.cast.isNotEmpty || t.info.directors.isNotEmpty) {
           items.add(MenuItem('あらすじ・出演', chevron: true, poster: t.poster, onSelect: () => nav.push(aboutScreen(t))));
         }
@@ -232,7 +245,7 @@ MenuScreen titleMenu(Title t) => MenuScreen(
         }
         return items;
       },
-      deps: [services.progress],
+      deps: [services.progress, services.playback],
     );
 
 String _seasonName(int s) => s == 0 ? '特別編' : (s > 1900 ? '$s 年' : 'シーズン $s');

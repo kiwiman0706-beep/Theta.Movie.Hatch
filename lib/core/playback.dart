@@ -28,9 +28,9 @@ class Playback extends ChangeNotifier {
         case 'pause':
           player.pause();
         case 'next':
-          nextEpisode != null ? next() : seekBy(const Duration(seconds: 30));
+          skipNext();
         case 'previous':
-          previous();
+          skipPrevious();
         case 'forward':
           seekBy(const Duration(seconds: 30));
         case 'rewind':
@@ -76,6 +76,12 @@ class Playback extends ChangeNotifier {
       if ((pos.inSeconds - _lastSaved).abs() >= 10) save();
     }));
     _subs.add(p.stream.volume.listen((_) => notifyListeners()));
+    // 字幕を選び直したら、画像の字幕（DVD・BD）かどうかで描き方を切り替える
+    _subs.add(p.stream.track.listen((t) => _applySubtitleRendering(t.subtitle)));
+    // 新しい動画を開いたら、チャプターを読み直す
+    _subs.add(p.stream.duration.listen((d) {
+      if (d > Duration.zero) _loadChapters();
+    }));
     return p;
   }
 
@@ -124,6 +130,11 @@ class Playback extends ChangeNotifier {
       final resume = fromStart ? 0 : progress.resumeAt(f.path);
       _lastSaved = resume;
       await applyAudioOutput();
+      chapters = const [];
+      secondarySubtitle = 'no';
+      try {
+        await _native?.setProperty('secondary-sid', 'no');
+      } catch (_) {}
       await player.open(Media(u.url, httpHeaders: u.headers, start: Duration(seconds: resume)));
     } catch (e) {
       error = '$e';
@@ -147,6 +158,94 @@ class Playback extends ChangeNotifier {
       _appliedAo = ao;
       log.add('[info] ao=$ao');
     }
+  }
+
+  // ---------------------------------------------------------------- チャプター（HandBrake の MP4・mkv など）
+
+  /// 今の動画のチャプター（題名と始まる時刻）。無ければ空
+  List<(String, Duration)> chapters = const [];
+
+  NativePlayer? get _native => _player?.platform is NativePlayer ? _player!.platform as NativePlayer : null;
+
+  Future<void> _loadChapters() async {
+    final n = _native;
+    final out = <(String, Duration)>[];
+    if (n != null) {
+      try {
+        final count = int.tryParse(await n.getProperty('chapter-list/count')) ?? 0;
+        for (var i = 0; i < count; i++) {
+          final title = await n.getProperty('chapter-list/$i/title');
+          final time = double.tryParse(await n.getProperty('chapter-list/$i/time')) ?? 0;
+          out.add((title.isEmpty ? 'チャプター ${i + 1}' : title, Duration(milliseconds: (time * 1000).round())));
+        }
+      } catch (_) {}
+    }
+    chapters = out;
+    notifyListeners();
+  }
+
+  /// 今いるチャプターの番号（無ければ -1）
+  int chapterAt(Duration pos) {
+    var i = -1;
+    for (var k = 0; k < chapters.length; k++) {
+      if (chapters[k].$2 <= pos + const Duration(milliseconds: 500)) i = k;
+    }
+    return i;
+  }
+
+  Future<void> seekChapter(int i) async {
+    if (i < 0 || i >= chapters.length) return;
+    await player.seek(chapters[i].$2);
+  }
+
+  /// 次のチャプターへ。無ければ false（呼んだ側で次の話・早送りにする）
+  bool nextChapter() {
+    if (!hasMedia || chapters.isEmpty) return false;
+    final i = chapterAt(player.state.position);
+    if (i + 1 >= chapters.length) return false;
+    seekChapter(i + 1);
+    return true;
+  }
+
+  /// 前のチャプターへ（始まって 3 秒を過ぎていたら、今のチャプターの頭へ）。無ければ false
+  bool previousChapter() {
+    if (!hasMedia || chapters.isEmpty) return false;
+    final pos = player.state.position;
+    final i = chapterAt(pos);
+    if (i < 0) return false;
+    if (pos - chapters[i].$2 > const Duration(seconds: 3)) {
+      seekChapter(i);
+    } else if (i > 0) {
+      seekChapter(i - 1);
+    } else {
+      player.seek(Duration.zero);
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------- 字幕
+
+  /// 2 つ目の字幕（同時に表示。文字の字幕だけ）。'no' で消す
+  String secondarySubtitle = 'no';
+
+  Future<void> setSecondarySubtitle(String id) async {
+    final n = _native;
+    if (n == null) return;
+    await n.setProperty('secondary-sid', id);
+    secondarySubtitle = id;
+    notifyListeners();
+  }
+
+  /// 画像の字幕（DVD の VobSub・BD の PGS・DVB）は、アプリでは文字として描けないので mpv に描かせる。
+  /// 文字の字幕は今までどおりアプリで描く（日本語の書体が確実なため）
+  Future<void> _applySubtitleRendering(SubtitleTrack t) async {
+    final n = _native;
+    if (n == null) return;
+    const bitmap = {'hdmv_pgs_subtitle', 'pgssub', 'dvd_subtitle', 'dvdsub', 'dvb_subtitle', 'dvbsub', 'xsub', 'vobsub'};
+    final image = t.image == true || bitmap.contains((t.codec ?? '').toLowerCase());
+    try {
+      await n.setProperty('sub-visibility', image ? 'yes' : 'no');
+    } catch (_) {}
   }
 
   /// 今の音声の様子（設定の「再生のログ」の先頭に出す）
@@ -201,6 +300,21 @@ class Playback extends ChangeNotifier {
     if (player.state.position.inSeconds > 5) return player.seek(Duration.zero);
     final p = previousEpisode;
     if (p != null) await play(title!, p.file, fromStart: true);
+  }
+
+  /// ▶▶（ホイール・車・Bluetooth・通知）：シリーズは次の話、映画はチャプターがあれば次のチャプター、無ければ 30 秒先へ
+  Future<void> skipNext() async {
+    if (!hasMedia) return;
+    if (nextEpisode != null) return next();
+    if (nextChapter()) return;
+    await seekBy(const Duration(seconds: 30));
+  }
+
+  /// ◀◀：チャプターがあれば前のチャプター（今のチャプターの頭）、無ければ前の話（始まって 5 秒を過ぎていたら頭へ）
+  Future<void> skipPrevious() async {
+    if (!hasMedia) return;
+    if (previousChapter()) return;
+    await previous();
   }
 
   Future<void> stop() async {
