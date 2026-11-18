@@ -61,6 +61,9 @@ class AppSettings extends ChangeNotifier {
   /// 左のタブに文字も出す（幅 40 → 116）
   bool tabLabels = false;
 
+  /// 音の出し方（Android の mpv の ao）：audiotrack（既定）・opensles
+  String audioOutput = 'audiotrack';
+
   bool get configured => (source == SourceKind.dsm ? dsUrl : davUrl).trim().isNotEmpty && user.isNotEmpty;
 
   Future<void> load() async {
@@ -79,6 +82,7 @@ class AppSettings extends ChangeNotifier {
     wheelGuide = _p.getBool('wheelGuide') ?? true;
     thetaLayout = _p.getString('thetaLayout') ?? 'auto';
     tabLabels = _p.getBool('tabLabels') ?? false;
+    audioOutput = _p.getString('audioOutput') ?? 'audiotrack';
     final s = secure;
     if (s != null) {
       try {
@@ -106,6 +110,7 @@ class AppSettings extends ChangeNotifier {
     await _p.setBool('wheelGuide', wheelGuide);
     await _p.setString('thetaLayout', thetaLayout);
     await _p.setBool('tabLabels', tabLabels);
+    await _p.setString('audioOutput', audioOutput);
     final values = {'password': password, 'did': did};
     final s = secure;
     for (final k in _secretKeys) {

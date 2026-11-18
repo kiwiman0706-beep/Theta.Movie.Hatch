@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
@@ -24,8 +25,16 @@ class Playback extends ChangeNotifier {
   late final VideoController video = VideoController(player);
   final _subs = <StreamSubscription<dynamic>>[];
 
+  /// mpv の警告・エラー（設定の「再生のログ」で見られる。音が出ないときなどの手がかり）
+  final log = <String>[];
+
   Player _create() {
-    final p = Player(configuration: const PlayerConfiguration(title: 'Theta Movie Hatch'));
+    final p = Player(
+        configuration: const PlayerConfiguration(title: 'Theta Movie Hatch', logLevel: MPVLogLevel.warn));
+    _subs.add(p.stream.log.listen((l) {
+      log.add('[${l.level}] ${l.prefix}: ${l.text.trim()}');
+      if (log.length > 300) log.removeAt(0);
+    }));
     _subs.add(p.stream.playing.listen((_) => notifyListeners()));
     _subs.add(p.stream.completed.listen((done) {
       if (done) _ended();
@@ -85,11 +94,54 @@ class Playback extends ChangeNotifier {
       final u = await library.source.stream(f.path);
       final resume = fromStart ? 0 : progress.resumeAt(f.path);
       _lastSaved = resume;
+      await applyAudioOutput();
       await player.open(Media(u.url, httpHeaders: u.headers, start: Duration(seconds: resume)));
     } catch (e) {
       error = '$e';
       notifyListeners();
     }
+  }
+
+  /// 音の出し方（Android）。media_kit の既定は OpenSL ES だが、端末によって音が出ないことがあるので、
+  /// 既定は AudioTrack（mpv-android と同じ）。設定で OpenSL ES にも変えられる
+  String? _appliedAo;
+  Future<void> applyAudioOutput() async {
+    if (!Platform.isAndroid) return;
+    // 選んだ方式を先に、だめならもう片方（同梱の mpv にあるのは audiotrack と opensles だけ）
+    final ao = settings.audioOutput == 'opensles' ? 'opensles,audiotrack' : 'audiotrack,opensles';
+    if (ao == _appliedAo) return;
+    final pl = player.platform;
+    if (pl is NativePlayer) {
+      await pl.setProperty('ao', ao);
+      // 再生中に変えたときは、音の出口を開き直す
+      if (_appliedAo != null && hasMedia) await pl.command(['ao-reload']);
+      _appliedAo = ao;
+      log.add('[info] ao=$ao');
+    }
+  }
+
+  /// 今の音声の様子（設定の「再生のログ」の先頭に出す）
+  Future<String> audioInfo() async {
+    final pl = _player;
+    if (pl == null) return '再生していません';
+    final st = pl.state;
+    final a = st.audioParams;
+    final t = st.track.audio;
+    var ao = '';
+    var cur = '';
+    final n = pl.platform;
+    if (n is NativePlayer) {
+      try {
+        ao = await n.getProperty('ao');
+        cur = await n.getProperty('current-ao');
+      } catch (_) {}
+    }
+    return [
+      '音量 ${st.volume.round()}　ミュート ${st.volume == 0 ? 'はい' : 'いいえ'}',
+      '音声トラック #${t.id} ${t.title ?? ''} ${t.language ?? ''}（全 ${st.tracks.audio.length - 2} 本）',
+      '音声 ${a.format ?? '-'} ${a.sampleRate ?? '-'}Hz ${a.channels ?? '-'}',
+      '出力 ao=$ao  使用中=$cur',
+    ].join('\n');
   }
 
   Future<void> toggle() async {

@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../app.dart';
@@ -120,6 +121,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// 音が出ない・再生できないときの手がかり（mpv の警告・エラーと、今の音声の様子）
+  Future<void> _showLog() async {
+    final info = await services.playback.audioInfo();
+    final lines = services.playback.log.reversed.take(120).toList();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('再生のログ'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              '$info\n\n${lines.isEmpty ? '（警告・エラーはありません）' : lines.join('\n')}',
+              style: const TextStyle(fontSize: 11, height: 1.4),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: '$info\n\n${lines.join('\n')}'));
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('コピー'),
+          ),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('閉じる')),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _apply();
@@ -217,6 +250,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
             ]),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        HudPanel(
+          code: 'AUDIO',
+          title: '音',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'audiotrack', label: Text('AudioTrack')),
+                ButtonSegment(value: 'opensles', label: Text('OpenSL ES')),
+              ],
+              selected: {_s.audioOutput},
+              onSelectionChanged: (v) async {
+                _s.audioOutput = v.first;
+                await _s.save();
+                await services.playback.applyAudioOutput();
+                setState(() {});
+              },
+            ),
+            const SizedBox(height: 4),
+            Text('音が出ないときは、もう一方に切り替えてみてください（再生中でも切り替わります）。それでも出なければ「再生のログ」をコピーして送ってください',
+                style: TextStyle(color: p.faint, fontSize: 11, height: 1.5)),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: PillButton(icon: Icons.receipt_long, text: '再生のログ', onTap: _showLog),
+            ),
           ]),
         ),
         const SizedBox(height: 16),
