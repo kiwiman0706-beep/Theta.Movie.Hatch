@@ -318,6 +318,9 @@ class _ShellState extends State<Shell> implements Nav {
       ),
     );
     _fullscreen = false;
+    // 全画面の裏で向きが変わっていても、閉じたときの向きを「前の向き」にする
+    // （縦で全画面 → 横に回して閉じたとき、縦→横と見なしてまた全画面にしないように）
+    if (mounted) _orientation = MediaQuery.orientationOf(context);
   }
 
   bool get _phone => Platform.isAndroid || Platform.isIOS;
@@ -1098,12 +1101,28 @@ class _FullscreenPlayerState extends State<FullscreenPlayer> {
         ),
     ];
     final accent = Theme.of(context).colorScheme.primary;
+    // 下の帯：付属の全画面ボタン（もう 1 枚全画面を重ねてしまい、抜けにくくなる）の代わりに「全画面を閉じる」
+    Widget exit() => IconButton(
+          tooltip: '全画面を閉じる',
+          icon: const Icon(Icons.fullscreen_exit, color: Colors.white),
+          onPressed: () => Navigator.of(context).maybePop(),
+        );
     final mobileTheme = kDefaultMaterialVideoControlsThemeData.copyWith(
       topButtonBar: top,
+      bottomButtonBar: [const MaterialPositionIndicator(), const Spacer(), exit()],
       seekBarThumbColor: accent,
       seekBarPositionColor: accent,
     );
-    final desktopTheme = kDefaultMaterialDesktopVideoControlsThemeData.copyWith(topButtonBar: top);
+    final desktopTheme = kDefaultMaterialDesktopVideoControlsThemeData.copyWith(
+      topButtonBar: top,
+      bottomButtonBar: [
+        const MaterialDesktopPlayOrPauseButton(),
+        const MaterialDesktopVolumeButton(),
+        const MaterialDesktopPositionIndicator(),
+        const Spacer(),
+        exit(),
+      ],
+    );
     return Scaffold(
       backgroundColor: Colors.black,
       body: MaterialVideoControlsTheme(
