@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'library.dart';
+import 'media_session.dart';
 import 'models.dart';
 import 'progress.dart';
 import 'settings.dart';
@@ -17,7 +18,28 @@ class Playback extends ChangeNotifier {
   final Library library;
   final Progress progress;
 
-  Playback(this.settings, this.library, this.progress);
+  Playback(this.settings, this.library, this.progress) {
+    // 車・Bluetooth・イヤホンのボタン
+    MediaSessionBridge.listen((b, pos) {
+      if (!hasMedia) return;
+      switch (b) {
+        case 'play':
+          player.play();
+        case 'pause':
+          player.pause();
+        case 'next':
+          nextEpisode != null ? next() : seekBy(const Duration(seconds: 30));
+        case 'previous':
+          previous();
+        case 'forward':
+          seekBy(const Duration(seconds: 30));
+        case 'rewind':
+          seekBy(const Duration(seconds: -10));
+        case 'seek':
+          if (pos != null) player.seek(Duration(milliseconds: pos));
+      }
+    });
+  }
 
   /// mpv は初めて再生するときに作る（起動を軽く。テストでも画面を描けるように）
   Player? _player;
@@ -35,7 +57,14 @@ class Playback extends ChangeNotifier {
       log.add('[${l.level}] ${l.prefix}: ${l.text.trim()}');
       if (log.length > 300) log.removeAt(0);
     }));
-    _subs.add(p.stream.playing.listen((_) => notifyListeners()));
+    // 再生・一時停止を Android に知らせる（オーディオフォーカスとメディアセッション）
+    _subs.add(p.stream.playing.listen((playing) {
+      MediaSessionBridge.state(playing: playing, position: p.state.position);
+      notifyListeners();
+    }));
+    _subs.add(p.stream.duration.listen((d) {
+      if (d > Duration.zero) MediaSessionBridge.meta(title?.displayName ?? '', label, d);
+    }));
     _subs.add(p.stream.completed.listen((done) {
       if (done) _ended();
     }));
@@ -177,6 +206,7 @@ class Playback extends ChangeNotifier {
   Future<void> stop() async {
     await save();
     await _player?.stop();
+    await MediaSessionBridge.stop();
     title = null;
     file = null;
     notifyListeners();

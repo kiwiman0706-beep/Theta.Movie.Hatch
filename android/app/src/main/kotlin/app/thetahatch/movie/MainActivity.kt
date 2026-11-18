@@ -22,11 +22,14 @@ class MainActivity : FlutterActivity() {
     private var pool: SoundPool? = null
     private var clickId = 0
     private var clickReady = false
+    private var media: MediaBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "theta_movie/series")
             .setMethodCallHandler(Series.handler(this))
+        val mediaChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "theta_movie/media")
+        media = MediaBridge(this, mediaChannel).also { mediaChannel.setMethodCallHandler(it.handler()) }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "theta_movie/click").setMethodCallHandler { call, result ->
             when (call.method) {
                 "click" -> {
@@ -63,6 +66,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        media?.release()
         pool?.release()
         pool = null
         super.onDestroy()
